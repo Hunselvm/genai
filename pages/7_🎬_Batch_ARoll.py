@@ -52,6 +52,13 @@ if not st.session_state.get('api_key'):
 # Display quota
 display_quota()
 
+st.sidebar.divider()
+debug_mode = st.sidebar.checkbox(
+    "🔍 Enable Debug Mode", 
+    value=False, 
+    help="Show detailed API communication logs in the main window"
+)
+
 st.markdown("""
 Generate multiple A-Roll videos in parallel from a single reference frame and multiple prompts.
 Upload a `.txt` file (one prompt per line) or `.csv` file (with per-prompt control).
@@ -514,8 +521,6 @@ if batch_items and reference_frame:
         if total_videos_to_generate > available:
             st.warning(f"⚠️ You may not have enough quota. Available: {available}, Needed: ~{total_videos_to_generate}")
 
-    debug_mode = st.checkbox("🔍 Enable Debug Mode", value=False, help="Show detailed API communication logs")
-
 
 # ============================================================================
 # UI - Generate Button & Progress Tracking
@@ -731,7 +736,7 @@ if batch_items and reference_frame and st.button("🚀 Generate All Videos", use
                                         "id": data.get('id'),
                                         "prompt": result_data['prompt'],
                                         "number_of_videos": result_data['number_of_videos'],
-                                        "file_url": file_url,
+                                        "file_urls": file_urls,
                                         "created_at": data.get('created_at')
                                     })
                             else:
