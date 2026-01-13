@@ -639,8 +639,39 @@ if batch_items and reference_frame and st.button("🚀 Generate All Videos", use
             results = asyncio.run(run_with_updates())
             st.session_state.aroll_results = results
 
+
             elapsed_total = time.time() - start_time
             st.success(f"✅ Batch generation completed in {elapsed_total:.1f}s!")
+
+        except AuthenticationError as e:
+            st.error(f"🔐 Authentication Error: {str(e)}")
+            st.info("💡 **Troubleshooting:**\n- Check that your API key is correct\n- Verify the key hasn't expired\n- Get a new key from https://genaipro.vn/docs-api")
+
+        except QuotaExceededError as e:
+            st.error(f"📊 Quota Exceeded: {str(e)}")
+            st.info("💡 **Troubleshooting:**\n- Check your quota above\n- Wait for quota to reset\n- Upgrade your plan if needed")
+
+        except NetworkError as e:
+            st.error(f"🌐 Network Error: {str(e)}")
+            st.info("💡 **Troubleshooting:**\n- Check your internet connection\n- Try again in a few moments\n- The API server might be experiencing issues")
+
+        except VEOAPIError as e:
+            st.error(f"❌ API Error: {str(e)}")
+            st.info("💡 Enable Debug Mode above to see detailed logs")
+
+        except Exception as e:
+            st.error(f"❌ Unexpected Error: {str(e)}")
+            st.info("💡 Enable Debug Mode above to see what went wrong")
+            if logger:
+                logger.error(f"Unexpected error: {str(e)}")
+
+        finally:
+            # Cleanup reference frame temp file
+            if start_frame_path and os.path.exists(start_frame_path):
+                try:
+                    os.unlink(start_frame_path)
+                except:
+                    pass
 
 # ============================================================================
 # UI - Results Display (Persistent)
@@ -797,35 +828,7 @@ if st.session_state.quota_info and 'client' in locals():
     except:
         pass
 
-        except AuthenticationError as e:
-            st.error(f"🔐 Authentication Error: {str(e)}")
-            st.info("💡 **Troubleshooting:**\n- Check that your API key is correct\n- Verify the key hasn't expired\n- Get a new key from https://genaipro.vn/docs-api")
 
-        except QuotaExceededError as e:
-            st.error(f"📊 Quota Exceeded: {str(e)}")
-            st.info("💡 **Troubleshooting:**\n- Check your quota above\n- Wait for quota to reset\n- Upgrade your plan if needed")
-
-        except NetworkError as e:
-            st.error(f"🌐 Network Error: {str(e)}")
-            st.info("💡 **Troubleshooting:**\n- Check your internet connection\n- Try again in a few moments\n- The API server might be experiencing issues")
-
-        except VEOAPIError as e:
-            st.error(f"❌ API Error: {str(e)}")
-            st.info("💡 Enable Debug Mode above to see detailed logs")
-
-        except Exception as e:
-            st.error(f"❌ Unexpected Error: {str(e)}")
-            st.info("💡 Enable Debug Mode above to see what went wrong")
-            if logger:
-                logger.error(f"Unexpected error: {str(e)}")
-
-        finally:
-            # Cleanup reference frame temp file
-            if start_frame_path and os.path.exists(start_frame_path):
-                try:
-                    os.unlink(start_frame_path)
-                except:
-                    pass
 
 
 # ============================================================================
