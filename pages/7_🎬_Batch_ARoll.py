@@ -532,18 +532,54 @@ if batch_items and reference_frame and st.button("🚀 Generate All Videos", wid
                 col2.metric("🎬 Total Videos", total_videos)
                 col3.metric("❌ Failed", failed_count)
 
+                # Failed prompts CSV download
+                if failed_count > 0:
+                    st.divider()
+                    failed_results = {pid: r for pid, r in results.items() if r['status'] == 'failed'}
+                    
+                    # Create CSV for failed prompts
+                    csv_buffer = io.StringIO()
+                    csv_writer = csv.writer(csv_buffer)
+                    csv_writer.writerow(['id', 'prompt', 'number_of_videos'])
+                    
+                    for prompt_id, result_data in failed_results.items():
+                        csv_writer.writerow([
+                            prompt_id,
+                            result_data['prompt'],
+                            result_data.get('number_of_videos', 1)
+                        ])
+                    
+                    csv_data = csv_buffer.getvalue()
+                    
+                    st.download_button(
+                        label=f"📥 Download Failed Prompts CSV ({failed_count} items)",
+                        data=csv_data,
+                        file_name="failed_prompts_aroll.csv",
+                        mime="text/csv",
+                        help="Download a CSV of failed prompts to retry later"
+                    )
+                    st.caption("💡 Use this CSV to retry only the failed prompts")
+
+                st.divider()
+
                 # Display each result
                 for prompt_id, result_data in results.items():
-                    with st.expander(f"🎬 {prompt_id}: {result_data['prompt']}", expanded=True):
+                    with st.expander(f"🎬 {prompt_id}: {result_data['prompt'][:100]}...", expanded=True):
                         if result_data['status'] == 'completed':
                             data = result_data['data']
 
                             file_url = data.get('file_url')
                             if file_url:
+                                # Clean prompt_id for filename (remove special chars)
+                                safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
                                 st.video(file_url)
-                                st.link_button(
-                                    "⬇️ Download Video",
-                                    file_url
+                                
+                                # Create download link with filename suggestion
+                                st.markdown(
+                                    f'<a href="{file_url}" download="{safe_id}.mp4" target="_blank">'
+                                    f'<button style="width:100%; padding:0.5rem; background-color:#0066cc; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Download {safe_id}.mp4</button>'
+                                    f'</a>',
+                                    unsafe_allow_html=True
                                 )
 
                                 # Details

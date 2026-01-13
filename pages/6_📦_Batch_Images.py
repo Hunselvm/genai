@@ -61,46 +61,17 @@ Upload a `.txt` file (one prompt per line) or `.csv` file (with per-prompt contr
 # ============================================================================
 
 def parse_txt_file(file_contents: str) -> List[Dict]:
-    """Parse text file with multi-line prompts separated by blank lines.
-    
-    Format:
-    ID_LINE
-    prompt line 1
-    prompt line 2
-    
-    NEXT_ID
-    next prompt...
-    """
-    # Split by double newlines to get prompt blocks
-    blocks = file_contents.strip().split('\n\n')
+    """Parse text file with one prompt per line."""
+    lines = file_contents.strip().split('\n')
     prompts = []
-    
-    for idx, block in enumerate(blocks, 1):
-        block = block.strip()
-        if not block:
-            continue
-        
-        lines = block.split('\n')
-        if len(lines) == 0:
-            continue
-        
-        # First line is the ID, rest is the prompt
-        if len(lines) == 1:
-            # Single line: use as both ID and prompt
-            prompt_id = lines[0].strip()
-            prompt_text = lines[0].strip()
-        else:
-            # Multi-line: first line is ID, rest is prompt
-            prompt_id = lines[0].strip()
-            prompt_text = '\n'.join(lines[1:]).strip()
-        
-        if prompt_text:  # Only add if we have prompt content
+    for idx, line in enumerate(lines, 1):
+        line = line.strip()
+        if line:  # Skip empty lines
             prompts.append({
-                'id': prompt_id if prompt_id else f"prompt_{idx}",
-                'prompt': prompt_text,
+                'id': f"prompt_{idx}",
+                'prompt': line,
                 'number_of_images': 1  # Default
             })
-    
     return prompts
 
 
@@ -536,9 +507,39 @@ if batch_items and st.button("🚀 Generate All Images", width='stretch', type="
                 col2.metric("📷 Total Images", total_images)
                 col3.metric("❌ Failed", failed_count)
 
+                # Failed prompts CSV download
+                if failed_count > 0:
+                    st.divider()
+                    failed_results = {pid: r for pid, r in results.items() if r['status'] == 'failed'}
+                    
+                    # Create CSV for failed prompts
+                    csv_buffer = io.StringIO()
+                    csv_writer = csv.writer(csv_buffer)
+                    csv_writer.writerow(['id', 'prompt', 'number_of_images'])
+                    
+                    for prompt_id, result_data in failed_results.items():
+                        csv_writer.writerow([
+                            prompt_id,
+                            result_data['prompt'],
+                            result_data.get('number_of_images', 1)
+                        ])
+                    
+                    csv_data = csv_buffer.getvalue()
+                    
+                    st.download_button(
+                        label=f"📥 Download Failed Prompts CSV ({failed_count} items)",
+                        data=csv_data,
+                        file_name="failed_prompts.csv",
+                        mime="text/csv",
+                        help="Download a CSV of failed prompts to retry later"
+                    )
+                    st.caption("💡 Use this CSV to retry only the failed prompts")
+
+                st.divider()
+
                 # Display each result
                 for prompt_id, result_data in results.items():
-                    with st.expander(f"📸 {prompt_id}: {result_data['prompt']}", expanded=True):
+                    with st.expander(f"📸 {prompt_id}: {result_data['prompt'][:100]}...", expanded=True):
                         if result_data['status'] == 'completed':
                             data = result_data['data']
 
@@ -554,10 +555,17 @@ if batch_items and st.button("🚀 Generate All Images", width='stretch', type="
                                 for idx, img_url in enumerate(file_urls):
                                     if img_url:  # Skip None values
                                         with cols[idx % 3]:
-                                            st.image(img_url, caption=f"Image {idx + 1}", width='stretch')
-                                            st.link_button(
-                                                f"⬇️ Download #{idx + 1}",
-                                                img_url
+                                            # Clean prompt_id for filename (remove special chars)
+                                            safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
+                                            caption = f"{prompt_id} - Image {idx + 1}"
+                                            st.image(img_url, caption=caption, width='stretch')
+                                            
+                                            # Create download link with filename suggestion
+                                            st.markdown(
+                                                f'<a href="{img_url}" download="{safe_id}_{idx+1}.jpg" target="_blank">'
+                                                f'<button style="width:100%; padding:0.5rem; background-color:#0066cc; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Download {safe_id}_{idx+1}.jpg</button>'
+                                                f'</a>',
+                                                unsafe_allow_html=True
                                             )
 
                                 # Details
