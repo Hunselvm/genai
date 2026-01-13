@@ -45,10 +45,12 @@ async def parse_sse_stream(response: httpx.Response, logger=None) -> AsyncGenera
                 logger.debug(f"Raw SSE line: {line[:100]}")
 
             # Parse data lines
-            if line.startswith('data: '):
-                data_str = line[6:]  # Remove 'data: ' prefix
+            if line.startswith('data:'):
+                # Remove 'data:' prefix and optional whitespace
+                data_str = line[5:].strip()
 
                 try:
+                    # Try parsing as JSON first
                     event_data = json.loads(data_str)
                     event_count += 1
                     
@@ -61,17 +63,23 @@ async def parse_sse_stream(response: httpx.Response, logger=None) -> AsyncGenera
                     if event_data.get('status') == 'failed':
                         error_msg = event_data.get('error', 'Unknown error occurred')
                         if logger:
-                            logger.error(f"Video generation failed: {error_msg}")
-                        raise VideoGenerationError(f"Video generation failed: {error_msg}")
+                            logger.error(f"Video/Image generation failed: {error_msg}")
+                        raise VideoGenerationError(f"Generation failed: {error_msg}")
 
                     yield event_data
 
-                except json.JSONDecodeError as e:
-                    # Log but continue - might be partial data or non-JSON message
+                except json.JSONDecodeError:
+                    # If not JSON, it might be a simple status string like "generating"
+                    # Create a synthetic event object
                     if logger:
-                        logger.warning(f"Failed to parse SSE data: {data_str[:100]}...")
-                    print(f"Warning: Failed to parse SSE data: {data_str}")
-                    continue
+                        logger.debug(f"Received non-JSON data: {data_str}")
+                    
+                    event_count += 1
+                    yield {
+                        "status": data_str,
+                        "process_percentage": 0, # Unknown progress for simple status
+                        "raw_data": data_str
+                    }
 
             # Parse event type (optional, for named events)
             elif line.startswith('event: '):

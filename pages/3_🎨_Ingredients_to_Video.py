@@ -4,12 +4,37 @@ import streamlit as st
 import asyncio
 from utils.veo_client import VEOClient
 from utils.sse_handler import parse_sse_stream
-from utils.exceptions import VEOAPIError
+from utils.exceptions import VEOAPIError, AuthenticationError, QuotaExceededError, NetworkError
+from utils.logger import StreamlitLogger
+from utils.quota_display import display_quota
 import time
 import tempfile
 import os
 
 st.set_page_config(page_title="Ingredients to Video", page_icon="🎨", layout="wide")
+
+# Custom CSS
+st.markdown("""
+<style>
+    .success-box {
+        padding: 1rem;
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 0.5rem;
+        color: #155724;
+    }
+    .debug-console {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 0.5rem;
+        padding: 0.5rem;
+        font-family: monospace;
+        font-size: 0.85rem;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+</style>
+""", unsafe_allow_html=True)
 
 st.title("🎨 Ingredients to Video Generation")
 
@@ -19,8 +44,10 @@ if not st.session_state.get('api_key'):
     st.stop()
 
 # Display quota
-from utils.quota_display import display_quota
 display_quota()
+
+# Debug mode toggle
+debug_mode = st.checkbox("🔍 Enable Debug Mode", value=False, help="Show detailed API communication logs")
 
 st.markdown("""
 Generate a video using multiple reference images. The AI will use these images
@@ -60,7 +87,9 @@ if st.button("🎬 Generate Video from Ingredients", use_container_width=True):
     elif not prompt.strip():
         st.error("Please enter a prompt!")
     else:
+        # Create containers
         progress_container = st.container()
+        debug_container = st.container() if debug_mode else None
 
         with progress_container:
             st.info(f"🚀 Starting video generation with {len(reference_images)} reference images...")
@@ -68,10 +97,19 @@ if st.button("🎬 Generate Video from Ingredients", use_container_width=True):
             progress_bar = st.progress(0)
             status_text = st.empty()
             time_text = st.empty()
+            retry_text = st.empty()
 
             start_time = time.time()
 
             temp_files = []
+            
+            # Setup logger
+            logger = None
+            if debug_mode and debug_container:
+                with debug_container:
+                    st.subheader("🔍 Debug Console")
+                    log_container = st.container()
+                    logger = StreamlitLogger(log_container)
 
             try:
                 # Save uploaded images to temporary files
@@ -82,20 +120,36 @@ if st.button("🎬 Generate Video from Ingredients", use_container_width=True):
                         image_paths.append(tmp.name)
                         temp_files.append(tmp.name)
 
+                if logger:
+                    logger.info("Initializing VEO API client...")
+
                 # Initialize VEO client
                 client = VEOClient(
                     api_key=st.session_state.api_key,
-                    base_url="https://genaipro.vn/api/v1"
+                    base_url="https://genaipro.vn/api/v1",
+                    debug=debug_mode,
+                    logger=logger
                 )
+
+                if logger:
+                    logger.info(f"Generating video with prompt: {prompt[:50]}...")
+                    logger.info(f"Number of reference images: {len(image_paths)}")
 
                 # Generate video
                 async def generate():
                     result = None
+                    event_count = 0
+                    
                     async with client.ingredients_to_video_stream(
                         image_paths=image_paths,
                         prompt=prompt
                     ) as response:
-                        async for event_data in parse_sse_stream(response):
+                        if logger:
+                            logger.success("Stream connection established!")
+                        
+                        async for event_data in parse_sse_stream(response, logger=logger):
+                            event_count += 1
+                            
                             # Update progress
                             progress = event_data.get('process_percentage', 0)
                             status = event_data.get('status', 'processing')
@@ -104,24 +158,92 @@ if st.button("🎬 Generate Video from Ingredients", use_container_width=True):
                             status_text.text(f"Status: {status.upper()} - {progress}%")
 
                             elapsed = time.time() - start_time
-                            time_text.caption(f"Elapsed time: {elapsed:.1f}s")
+                            time_text.caption(f"Elapsed time: {elapsed:.1f}s | Events received: {event_count}")
 
                             # Check for completion
                             if status == 'completed':
+                                if logger:
+                                    logger.success(f"Video generation completed! (Total events: {event_count})")
                                 result = event_data
                                 break
                             elif status == 'failed':
-                                raise Exception(event_data.get('error', 'Generation failed'))
+                                error_msg = event_data.get('error', 'Generation failed')
+                                if logger:
+                                    logger.error(f"Generation failed: {error_msg}")
+                                raise Exception(error_msg)
+                    
+                    # If no events received, try polling history
+                    if event_count == 0:
+                        if logger:
+                            logger.warning("No SSE events received. Switching to polling mode...")
+                            logger.info("Video generation started in background. Checking history...")
+                        
+                        status_text.text("⏳ Video queued for generation. Checking status...")
+                        
+                        # Poll history for recent videos
+                        max_polls = 60
+                        poll_interval = 5
+                        
+                        for poll_count in range(max_polls):
+                            await asyncio.sleep(poll_interval)
+                            
+                            elapsed = time.time() - start_time
+                            time_text.caption(f"Polling... ({poll_count + 1}/{max_polls}) | Elapsed: {elapsed:.0f}s")
+                            
+                            try:
+                                history = await client.get_histories(page=1, page_size=5)
+                                
+                                if history and history.get('data'):
+                                    for item in history['data']:
+                                        item_prompt = item.get('prompt', '')
+                                        item_status = item.get('status', '')
+                                        
+                                        if prompt.lower() in item_prompt.lower():
+                                            if logger:
+                                                logger.info(f"Found matching video: {item_status}")
+                                            
+                                            if item_status == 'completed':
+                                                result = item
+                                                if logger:
+                                                    logger.success("Video generation completed!")
+                                                break
+                                            elif item_status == 'processing':
+                                                progress_bar.progress(0.5)
+                                                status_text.text(f"Status: PROCESSING (polling)")
+                                            elif item_status == 'failed':
+                                                error_msg = item.get('error', 'Generation failed')
+                                                if logger:
+                                                    logger.error(f"Generation failed: {error_msg}")
+                                                raise Exception(error_msg)
+                                    
+                                    if result:
+                                        break
+                            
+                            except Exception as e:
+                                if logger:
+                                    logger.warning(f"Polling error: {str(e)}")
+                        
+                        if not result:
+                            if logger:
+                                logger.warning("Polling timeout. Video may still be processing.")
+                            raise Exception(
+                                "Video generation is taking longer than expected.\n"
+                                "Please check the History page in a few minutes to see your video."
+                            )
 
                     await client.close()
                     return result
 
                 # Run async function
+                if logger:
+                    logger.info("Starting async video generation...")
+                
                 result = asyncio.run(generate())
 
                 if result:
                     progress_bar.progress(1.0)
                     status_text.text("Status: COMPLETED - 100%")
+                    retry_text.empty()
 
                     st.success("✅ Video generated successfully!")
 
@@ -132,10 +254,12 @@ if st.button("🎬 Generate Video from Ingredients", use_container_width=True):
                     if result.get('file_url'):
                         st.video(result['file_url'])
 
-                        col1, col2 = st.columns(2)
+                        col1, col2, col3 = st.columns(3)
                         with col1:
                             st.link_button("🔗 Open in New Tab", result['file_url'])
                         with col2:
+                            st.link_button("⬇️ Download Video", result['file_url'], help="Right-click and 'Save As' to download")
+                        with col3:
                             if st.button("📋 Copy URL"):
                                 st.code(result['file_url'], language=None)
 
@@ -149,18 +273,38 @@ if st.button("🎬 Generate Video from Ingredients", use_container_width=True):
                                 "file_url": result.get('file_url'),
                                 "created_at": result.get('created_at'),
                             })
+                    else:
+                        st.warning("Video URL not available yet. Check the History page.")
+                    
+                    # Update quota
+                    if st.session_state.quota_info:
+                        try:
+                            quota = asyncio.run(client.get_quota())
+                            st.session_state.quota_info = quota
+                        except:
+                            pass
+
+            except AuthenticationError as e:
+                st.error(f"🔐 Authentication Error: {str(e)}")
+                st.info("💡 **Troubleshooting:**\n- Check that your API key is correct\n- Verify the key hasn't expired\n- Get a new key from https://genaipro.vn/docs-api")
+
+            except QuotaExceededError as e:
+                st.error(f"📊 Quota Exceeded: {str(e)}")
+                st.info("💡 **Troubleshooting:**\n- Check your quota above\n- Wait for quota to reset\n- Upgrade your plan if needed")
+
+            except NetworkError as e:
+                st.error(f"🌐 Network Error: {str(e)}")
+                st.info("💡 **Troubleshooting:**\n- Check your internet connection\n- Try again in a few moments\n- The API server might be experiencing issues")
 
             except VEOAPIError as e:
                 st.error(f"❌ API Error: {str(e)}")
-                progress_bar.empty()
-                status_text.empty()
-                time_text.empty()
+                st.info("💡 Enable Debug Mode above to see detailed logs")
 
             except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
-                progress_bar.empty()
-                status_text.empty()
-                time_text.empty()
+                st.error(f"❌ Unexpected Error: {str(e)}")
+                st.info("💡 Enable Debug Mode above to see what went wrong")
+                if logger:
+                    logger.error(f"Unexpected error: {str(e)}")
 
             finally:
                 # Cleanup temp files
