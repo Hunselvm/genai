@@ -53,20 +53,58 @@ async def parse_sse_stream(response: httpx.Response, logger=None) -> AsyncGenera
                     # Try parsing as JSON first
                     event_data = json.loads(data_str)
                     event_count += 1
-                    
-                    if logger:
-                        status = event_data.get('status', 'unknown')
-                        progress = event_data.get('process_percentage', 0)
-                        logger.debug(f"SSE Event #{event_count}: {status} - {progress}%")
 
-                    # Check for error status in event data
-                    if event_data.get('status') == 'failed':
-                        error_msg = event_data.get('error', 'Unknown error occurred')
+                    # Handle array responses (multiple videos or completion with array)
+                    if isinstance(event_data, list):
                         if logger:
-                            logger.error(f"Video/Image generation failed: {error_msg}")
-                        raise VideoGenerationError(f"Generation failed: {error_msg}")
+                            logger.debug(f"SSE Event #{event_count}: Received array with {len(event_data)} items")
 
-                    yield event_data
+                        # If it's an array of results, take the first one and mark as completed
+                        if len(event_data) > 0 and isinstance(event_data[0], dict):
+                            result = event_data[0]
+                            # Mark as completed since we received the final results
+                            if 'status' not in result:
+                                result['status'] = 'completed'
+                            if 'process_percentage' not in result:
+                                result['process_percentage'] = 100
+
+                            if logger:
+                                logger.success(f"Received completion array with {len(event_data)} video(s)")
+
+                            yield result
+                        else:
+                            # Empty array or unexpected format
+                            yield {
+                                "status": "completed",
+                                "process_percentage": 100,
+                                "raw_data": event_data
+                            }
+
+                    # Handle dictionary responses (normal progress updates)
+                    elif isinstance(event_data, dict):
+                        if logger:
+                            status = event_data.get('status', 'unknown')
+                            progress = event_data.get('process_percentage', 0)
+                            logger.debug(f"SSE Event #{event_count}: {status} - {progress}%")
+
+                        # Check for error status in event data
+                        if event_data.get('status') == 'failed':
+                            error_msg = event_data.get('error', 'Unknown error occurred')
+                            if logger:
+                                logger.error(f"Video/Image generation failed: {error_msg}")
+                            raise VideoGenerationError(f"Generation failed: {error_msg}")
+
+                        yield event_data
+
+                    else:
+                        # Unexpected type, wrap it
+                        if logger:
+                            logger.warning(f"Unexpected data type: {type(event_data)}")
+                        yield {
+                            "status": "processing",
+                            "process_percentage": 0,
+                            "raw_data": event_data
+                        }
 
                 except json.JSONDecodeError:
                     # If not JSON, it might be a simple status string like "generating"
