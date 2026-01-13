@@ -2,6 +2,7 @@
 
 import json
 import httpx
+import asyncio
 from typing import AsyncGenerator, Dict, Any
 
 from utils.exceptions import StreamInterruptedError, VideoGenerationError
@@ -28,12 +29,20 @@ async def parse_sse_stream(response: httpx.Response, logger=None) -> AsyncGenera
         StreamInterruptedError: Stream was interrupted or parsing failed
     """
     event_count = 0
+    last_event_time = asyncio.get_event_loop().time()
+    timeout_seconds = 30  # Timeout if no events for 30 seconds
+    
     try:
         if logger:
             logger.debug("Starting SSE stream parsing...")
         
         async for line in response.aiter_lines():
             line = line.strip()
+            last_event_time = asyncio.get_event_loop().time()  # Reset timeout on any line
+            
+            # Log raw lines in debug mode
+            if logger and line:
+                logger.debug(f"Raw SSE line: {line[:100]}")
 
             # Parse data lines
             if line.startswith('data: '):
@@ -75,7 +84,13 @@ async def parse_sse_stream(response: httpx.Response, logger=None) -> AsyncGenera
                 continue
         
         if logger:
-            logger.debug(f"SSE stream ended. Total events: {event_count}")
+            if event_count == 0:
+                logger.error(f"SSE stream ended with 0 events! This usually means:")
+                logger.error("- API rate limiting (quota exceeded)")
+                logger.error("- Invalid API key or authentication issue")
+                logger.error("- API server error (check status at genaipro.vn)")
+            else:
+                logger.debug(f"SSE stream ended. Total events: {event_count}")
 
     except Exception as e:
         if isinstance(e, VideoGenerationError):

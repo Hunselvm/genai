@@ -40,6 +40,37 @@ if not st.session_state.get('api_key'):
     st.error("⚠️ Please enter your API key in the sidebar first!")
     st.stop()
 
+# Display quota info if available
+if st.session_state.get('quota_info'):
+    quota = st.session_state.quota_info
+    available = quota.get('available_quota', 0)
+    total = quota.get('total_quota', 0)
+    
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        if available == 0:
+            st.error(f"⚠️ **Quota Exhausted!** You have 0 credits remaining. Please check the sidebar.")
+        elif available < 5:
+            st.warning(f"⚠️ **Low Quota:** {available}/{total} credits remaining")
+        else:
+            st.info(f"📊 **Quota:** {available}/{total} credits available")
+    with col2:
+        if st.button("🔄 Refresh Quota"):
+            try:
+                from utils.veo_client import VEOClient
+                client = VEOClient(
+                    api_key=st.session_state.api_key,
+                    base_url="https://genaipro.vn/api/v1"
+                )
+                quota = asyncio.run(client.get_quota())
+                st.session_state.quota_info = quota
+                asyncio.run(client.close())
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to refresh: {str(e)}")
+
+st.divider()
+
 # Debug mode toggle
 debug_mode = st.checkbox("🔍 Enable Debug Mode", value=False, help="Show detailed API communication logs")
 
@@ -163,6 +194,18 @@ if submit_button:
                                 if logger:
                                     logger.error(f"Generation failed: {error_msg}")
                                 raise Exception(error_msg)
+                    
+                    # Check if we received any events at all
+                    if event_count == 0:
+                        if logger:
+                            logger.error("No events received from API!")
+                        raise Exception(
+                            "API returned empty response. This usually means:\\n"
+                            "- Your API quota is exhausted\\n"
+                            "- Rate limiting is active\\n"
+                            "- API authentication issue\\n"
+                            "Please check your quota in the sidebar."
+                        )
 
                     await client.close()
                     return result
