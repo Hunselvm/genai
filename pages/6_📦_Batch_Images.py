@@ -7,6 +7,7 @@ import io
 import time
 import tempfile
 import os
+import uuid
 from typing import List, Dict, Tuple, Optional
 
 from utils.veo_client import VEOClient
@@ -60,18 +61,53 @@ Upload a `.txt` file (one prompt per line) or `.csv` file (with per-prompt contr
 # Helper Functions
 # ============================================================================
 
+def get_unique_id():
+    """Generate a unique ID for UI widgets."""
+    return str(uuid.uuid4())
+
+
 def parse_txt_file(file_contents: str) -> List[Dict]:
-    """Parse text file with one prompt per line."""
-    lines = file_contents.strip().split('\n')
+    """Parse text file with multi-line prompts separated by blank lines.
+    
+    Format:
+    ID_LINE
+    prompt line 1
+    prompt line 2
+    
+    NEXT_ID
+    next prompt...
+    """
+    # Split by double newlines to get prompt blocks
+    blocks = file_contents.strip().split('\n\n')
     prompts = []
-    for idx, line in enumerate(lines, 1):
-        line = line.strip()
-        if line:  # Skip empty lines
+    
+    for idx, block in enumerate(blocks, 1):
+        block = block.strip()
+        if not block:
+            continue
+        
+        lines = block.split('\n')
+        if len(lines) == 0:
+            continue
+        
+        # First line is the ID, rest is the prompt
+        if len(lines) == 1:
+            # Single line: use as both ID and prompt
+            prompt_id = lines[0].strip()
+            prompt_text = lines[0].strip()
+        else:
+            # Multi-line: first line is ID, rest is prompt
+            prompt_id = lines[0].strip()
+            prompt_text = '\n'.join(lines[1:]).strip()
+        
+        if prompt_text:  # Only add if we have prompt content
             prompts.append({
-                'id': f"prompt_{idx}",
-                'prompt': line,
-                'number_of_images': 1  # Default
+                'id': prompt_id if prompt_id else f"prompt_{idx}",
+                'prompt': prompt_text,
+                'number_of_images': 1,  # Default
+                '_ui_id': get_unique_id()  # For stable UI keys
             })
+    
     return prompts
 
 
@@ -87,7 +123,8 @@ def parse_csv_file(file_contents: str) -> List[Dict]:
         prompts.append({
             'id': row.get('id', f"prompt_{idx}"),
             'prompt': row['prompt'].strip(),
-            'number_of_images': int(row.get('number_of_images', 1))
+            'number_of_images': int(row.get('number_of_images', 1)),
+            '_ui_id': get_unique_id()
         })
 
     return prompts
@@ -265,85 +302,144 @@ class BatchImageGenerator:
 
 
 # ============================================================================
-# UI - File Upload Section
+# UI - Input Section
 # ============================================================================
 
-uploaded_file = st.file_uploader(
-    "Upload Prompts File",
-    type=['txt', 'csv'],
-    help="Text file: one prompt per line. CSV: columns 'prompt', 'number_of_images', 'id'"
-)
+if 'batch_items' not in st.session_state:
+    st.session_state.batch_items = []
 
-batch_items = []
-file_ext = None
+if 'last_file_ext' not in st.session_state:
+    st.session_state.last_file_ext = 'txt'
 
-if uploaded_file:
-    # Parse file
-    file_contents = uploaded_file.getvalue().decode('utf-8')
-    file_ext = uploaded_file.name.split('.')[-1].lower()
+st.subheader("1. Add Prompts")
 
-    try:
-        if file_ext == 'txt':
-            batch_items = parse_txt_file(file_contents)
-        elif file_ext == 'csv':
-            batch_items = parse_csv_file(file_contents)
+input_tab1, input_tab2 = st.tabs(["📁 Upload File", "✍️ Manual Input"])
 
-        # Validate
-        is_valid, error_msg = validate_batch_items(batch_items)
-        if not is_valid:
-            st.error(f"❌ Invalid input: {error_msg}")
-            st.stop()
-
-
-        st.success(f"✅ Loaded {len(batch_items)} prompts from {uploaded_file.name}")
-
-        # Editable Preview
-        with st.expander("📝 Edit Prompts", expanded=True):
-            st.info("💡 You can edit the prompts, IDs, and number of images before generating")
-            
-            # Create editable inputs for each prompt
-            for idx, item in enumerate(batch_items):
-                st.divider()
-                col1, col2 = st.columns([1, 3])
+with input_tab1:
+    uploaded_file = st.file_uploader(
+        "Upload Prompts File",
+        type=['txt', 'csv'],
+        help="Text file: ID + Prompt blocks. CSV: columns 'prompt', 'number_of_images', 'id'"
+    )
+    
+    if uploaded_file:
+        if st.button("📥 Load from File", type="secondary"):
+            try:
+                content = uploaded_file.getvalue().decode('utf-8')
+                ext = uploaded_file.name.split('.')[-1].lower()
                 
-                with col1:
-                    # Editable ID
-                    new_id = st.text_input(
-                        "ID",
-                        value=item['id'],
-                        key=f"id_{idx}",
-                        help="Unique identifier for this prompt"
-                    )
-                    batch_items[idx]['id'] = new_id
-                    
-                    # Editable number of images
-                    new_num = st.number_input(
-                        "# Images",
-                        min_value=1,
-                        max_value=4,
-                        value=item['number_of_images'],
-                        key=f"num_{idx}",
-                        help="Number of images to generate (1-4)"
-                    )
-                    batch_items[idx]['number_of_images'] = new_num
+                new_items = []
+                if ext == 'txt':
+                    new_items = parse_txt_file(content)
+                elif ext == 'csv':
+                    new_items = parse_csv_file(content)
                 
-                with col2:
-                    # Editable prompt
-                    new_prompt = st.text_area(
-                        f"Prompt {idx + 1}",
-                        value=item['prompt'],
-                        key=f"prompt_{idx}",
-                        height=100,
-                        help="Edit the prompt text"
-                    )
-                    batch_items[idx]['prompt'] = new_prompt
-            
-            if len(batch_items) > 10:
-                st.caption(f"Showing all {len(batch_items)} prompts")
+                is_valid, msg = validate_batch_items(new_items)
+                if is_valid:
+                    st.session_state.batch_items = new_items
+                    st.session_state.last_file_ext = ext
+                    st.success(f"✅ Loaded {len(new_items)} prompts!")
+                    st.rerun()
+                else:
+                    st.error(f"❌ Invalid file: {msg}")
+            except Exception as e:
+                st.error(f"❌ Error parsing file: {str(e)}")
 
-    except Exception as e:
-        st.error(f"❌ Failed to parse file: {str(e)}")
-        st.stop()
+with input_tab2:
+    manual_text = st.text_area(
+        "Paste Prompts (TXT format)", 
+        height=200,
+        placeholder="1 PROMPT\nA beautiful landscape...\n\n2 PROMPT\nA futuristic city..."
+    )
+    if st.button("📥 Load from Text"):
+        if manual_text.strip():
+            new_items = parse_txt_file(manual_text)
+            is_valid, msg = validate_batch_items(new_items)
+            if is_valid:
+                st.session_state.batch_items = new_items
+                st.session_state.last_file_ext = 'txt'
+                st.success(f"✅ Loaded {len(new_items)} prompts!")
+                st.rerun()
+            else:
+                st.error(f"❌ Invalid format: {msg}")
+        else:
+            st.warning("⚠️ Please enter some text first")
+
+# ============================================================================
+# UI - Edit & Preview Section
+# ============================================================================
+
+batch_items = st.session_state.batch_items
+file_ext = st.session_state.last_file_ext
+
+if batch_items:
+    st.divider()
+    st.subheader(f"2. Edit Prompts ({len(batch_items)})")
+    
+    # Global clear
+    if st.button("🗑️ Clear All"):
+        st.session_state.batch_items = []
+        st.rerun()
+
+    # Editable list
+    items_to_remove = []
+    
+    for idx, item in enumerate(batch_items):
+        with st.container():
+            col1, col2, col3 = st.columns([1, 0.2, 4])
+            
+            # Ensure unique key for each widget using _ui_id
+            ui_key = item.get('_ui_id', f"fallback_{idx}")
+            
+            with col1:
+                # ID and Count
+                new_id = st.text_input(
+                    "ID", 
+                    value=item['id'], 
+                    key=f"id_{ui_key}",
+                    label_visibility="collapsed",
+                    placeholder="ID"
+                )
+                st.session_state.batch_items[idx]['id'] = new_id
+                
+                new_count = st.number_input(
+                    "Count", 
+                    min_value=1, 
+                    max_value=4, 
+                    value=item['number_of_images'], 
+                    key=f"cnt_{ui_key}", 
+                    label_visibility="collapsed"
+                )
+                st.session_state.batch_items[idx]['number_of_images'] = new_count
+
+            with col2:
+                # Remove button
+                # We use a button that adds to removal list.
+                # Since interacting with any button triggers rerun, this logic runs, 
+                # then we process removals, then rerun again to update UI.
+                if st.button("🗑️", key=f"del_{ui_key}", help="Remove this prompt"):
+                    items_to_remove.append(idx)
+            
+            with col3:
+                # Prompt Text
+                new_prompt = st.text_area(
+                    "Prompt", 
+                    value=item['prompt'], 
+                    key=f"prm_{ui_key}",
+                    height=100,
+                    label_visibility="collapsed",
+                    placeholder="Enter prompt here..."
+                )
+                st.session_state.batch_items[idx]['prompt'] = new_prompt
+            
+            st.divider()
+
+    # Process removals if any
+    if items_to_remove:
+        # Remove in reverse order
+        for idx in sorted(items_to_remove, reverse=True):
+            st.session_state.batch_items.pop(idx)
+        st.rerun()
 
 
 # ============================================================================
