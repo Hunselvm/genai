@@ -4,7 +4,8 @@ import streamlit as st
 import asyncio
 from utils.veo_client import VEOClient
 from utils.sse_handler import parse_sse_stream
-from utils.exceptions import VEOAPIError
+from utils.exceptions import VEOAPIError, AuthenticationError, QuotaExceededError, NetworkError
+from utils.logger import StreamlitLogger
 import time
 
 st.set_page_config(page_title="Text to Video", page_icon="📝", layout="wide")
@@ -19,6 +20,16 @@ st.markdown("""
         border-radius: 0.5rem;
         color: #155724;
     }
+    .debug-console {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 0.5rem;
+        padding: 0.5rem;
+        font-family: monospace;
+        font-size: 0.85rem;
+        max-height: 300px;
+        overflow-y: auto;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -28,6 +39,9 @@ st.title("📝 Text to Video Generation")
 if not st.session_state.get('api_key'):
     st.error("⚠️ Please enter your API key in the sidebar first!")
     st.stop()
+
+# Debug mode toggle
+debug_mode = st.checkbox("🔍 Enable Debug Mode", value=False, help="Show detailed API communication logs")
 
 # Input form
 with st.form("text_to_video_form"):
@@ -67,8 +81,9 @@ if submit_button:
     if not prompt.strip():
         st.error("Please enter a prompt!")
     else:
-        # Create placeholder for progress
+        # Create containers
         progress_container = st.container()
+        debug_container = st.container() if debug_mode else None
 
         with progress_container:
             st.info(f"🚀 Starting video generation...")
@@ -76,25 +91,57 @@ if submit_button:
             progress_bar = st.progress(0)
             status_text = st.empty()
             time_text = st.empty()
+            retry_text = st.empty()
 
             start_time = time.time()
 
+            # Setup logger
+            logger = None
+            if debug_mode and debug_container:
+                with debug_container:
+                    st.subheader("🔍 Debug Console")
+                    log_container = st.container()
+                    logger = StreamlitLogger(log_container)
+
             try:
                 # Initialize VEO client
+                if logger:
+                    logger.info("Initializing VEO API client...")
+                
                 client = VEOClient(
                     api_key=st.session_state.api_key,
-                    base_url="https://genaipro.vn/api/v1"
+                    base_url="https://genaipro.vn/api/v1",
+                    debug=debug_mode,
+                    logger=logger
                 )
+
+                if logger:
+                    logger.info(f"Generating video with prompt: {prompt[:50]}...")
+                    logger.info(f"Aspect ratio: {aspect_ratio}")
+                    logger.info(f"Number of videos: {number_of_videos}")
+
+                # Retry callback
+                def on_retry(attempt, delay):
+                    retry_text.warning(f"⏳ Retry attempt {attempt}. Waiting {delay}s...")
+                    if logger:
+                        logger.warning(f"Retrying (attempt {attempt}, delay {delay}s)")
 
                 # Generate video
                 async def generate():
                     result = None
+                    event_count = 0
+                    
                     async with client.text_to_video_stream(
                         prompt=prompt,
                         aspect_ratio=aspect_ratio,
                         number_of_videos=number_of_videos
                     ) as response:
-                        async for event_data in parse_sse_stream(response):
+                        if logger:
+                            logger.success("Stream connection established!")
+                        
+                        async for event_data in parse_sse_stream(response, logger=logger):
+                            event_count += 1
+                            
                             # Update progress
                             progress = event_data.get('process_percentage', 0)
                             status = event_data.get('status', 'processing')
@@ -103,24 +150,33 @@ if submit_button:
                             status_text.text(f"Status: {status.upper()} - {progress}%")
 
                             elapsed = time.time() - start_time
-                            time_text.caption(f"Elapsed time: {elapsed:.1f}s")
+                            time_text.caption(f"Elapsed time: {elapsed:.1f}s | Events received: {event_count}")
 
                             # Check for completion
                             if status == 'completed':
+                                if logger:
+                                    logger.success(f"Video generation completed! (Total events: {event_count})")
                                 result = event_data
                                 break
                             elif status == 'failed':
-                                raise Exception(event_data.get('error', 'Generation failed'))
+                                error_msg = event_data.get('error', 'Generation failed')
+                                if logger:
+                                    logger.error(f"Generation failed: {error_msg}")
+                                raise Exception(error_msg)
 
                     await client.close()
                     return result
 
                 # Run async function
+                if logger:
+                    logger.info("Starting async video generation...")
+                
                 result = asyncio.run(generate())
 
                 if result:
                     progress_bar.progress(1.0)
                     status_text.text("Status: COMPLETED - 100%")
+                    retry_text.empty()
 
                     st.success("✅ Video generated successfully!")
 
@@ -157,17 +213,47 @@ if submit_button:
                         except:
                             pass
 
+            except AuthenticationError as e:
+                st.error(f"🔐 Authentication Error: {str(e)}")
+                st.info("💡 **Troubleshooting:**\n- Check that your API key is correct\n- Verify the key hasn't expired\n- Get a new key from https://genaipro.vn/docs-api")
+                progress_bar.empty()
+                status_text.empty()
+                time_text.empty()
+                retry_text.empty()
+
+            except QuotaExceededError as e:
+                st.error(f"📊 Quota Exceeded: {str(e)}")
+                st.info("💡 **Troubleshooting:**\n- Check your quota in the sidebar\n- Wait for quota to reset\n- Upgrade your plan if needed")
+                progress_bar.empty()
+                status_text.empty()
+                time_text.empty()
+                retry_text.empty()
+
+            except NetworkError as e:
+                st.error(f"🌐 Network Error: {str(e)}")
+                st.info("💡 **Troubleshooting:**\n- Check your internet connection\n- Try again in a few moments\n- The API server might be experiencing issues")
+                progress_bar.empty()
+                status_text.empty()
+                time_text.empty()
+                retry_text.empty()
+
             except VEOAPIError as e:
                 st.error(f"❌ API Error: {str(e)}")
+                st.info("💡 Enable Debug Mode above to see detailed logs")
                 progress_bar.empty()
                 status_text.empty()
                 time_text.empty()
+                retry_text.empty()
 
             except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
+                st.error(f"❌ Unexpected Error: {str(e)}")
+                st.info("💡 Enable Debug Mode above to see what went wrong")
+                if logger:
+                    logger.error(f"Unexpected error: {str(e)}")
                 progress_bar.empty()
                 status_text.empty()
                 time_text.empty()
+                retry_text.empty()
 
 # Tips section
 with st.expander("💡 Tips for Better Results"):

@@ -7,7 +7,7 @@ from typing import AsyncGenerator, Dict, Any
 from utils.exceptions import StreamInterruptedError, VideoGenerationError
 
 
-async def parse_sse_stream(response: httpx.Response) -> AsyncGenerator[Dict[str, Any], None]:
+async def parse_sse_stream(response: httpx.Response, logger=None) -> AsyncGenerator[Dict[str, Any], None]:
     """
     Parse Server-Sent Events stream from VEO API.
 
@@ -18,6 +18,7 @@ async def parse_sse_stream(response: httpx.Response) -> AsyncGenerator[Dict[str,
 
     Args:
         response: httpx Response object with SSE stream
+        logger: Optional logger for debugging
 
     Yields:
         Parsed event data as dictionaries
@@ -26,7 +27,11 @@ async def parse_sse_stream(response: httpx.Response) -> AsyncGenerator[Dict[str,
         VideoGenerationError: Video generation failed (status: 'failed' in event)
         StreamInterruptedError: Stream was interrupted or parsing failed
     """
+    event_count = 0
     try:
+        if logger:
+            logger.debug("Starting SSE stream parsing...")
+        
         async for line in response.aiter_lines():
             line = line.strip()
 
@@ -36,16 +41,26 @@ async def parse_sse_stream(response: httpx.Response) -> AsyncGenerator[Dict[str,
 
                 try:
                     event_data = json.loads(data_str)
+                    event_count += 1
+                    
+                    if logger:
+                        status = event_data.get('status', 'unknown')
+                        progress = event_data.get('process_percentage', 0)
+                        logger.debug(f"SSE Event #{event_count}: {status} - {progress}%")
 
                     # Check for error status in event data
                     if event_data.get('status') == 'failed':
                         error_msg = event_data.get('error', 'Unknown error occurred')
+                        if logger:
+                            logger.error(f"Video generation failed: {error_msg}")
                         raise VideoGenerationError(f"Video generation failed: {error_msg}")
 
                     yield event_data
 
-                except json.JSONDecodeError:
+                except json.JSONDecodeError as e:
                     # Log but continue - might be partial data or non-JSON message
+                    if logger:
+                        logger.warning(f"Failed to parse SSE data: {data_str[:100]}...")
                     print(f"Warning: Failed to parse SSE data: {data_str}")
                     continue
 
@@ -58,10 +73,15 @@ async def parse_sse_stream(response: httpx.Response) -> AsyncGenerator[Dict[str,
             # Empty line signals end of event
             elif line == '':
                 continue
+        
+        if logger:
+            logger.debug(f"SSE stream ended. Total events: {event_count}")
 
     except Exception as e:
         if isinstance(e, VideoGenerationError):
             raise
+        if logger:
+            logger.error(f"SSE stream interrupted: {str(e)}")
         raise StreamInterruptedError(f"SSE stream interrupted: {str(e)}")
 
 

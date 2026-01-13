@@ -16,7 +16,7 @@ from utils.exceptions import (
 class VEOClient:
     """Client for interacting with the GenAIPro VEO API."""
 
-    def __init__(self, api_key: str, base_url: str, timeout: float = 300.0):
+    def __init__(self, api_key: str, base_url: str, timeout: float = 300.0, debug: bool = False, logger=None):
         """
         Initialize VEO API client.
 
@@ -24,10 +24,14 @@ class VEOClient:
             api_key: JWT token for authentication
             base_url: Base URL for the API (e.g., https://genaipro.vn/api/v1)
             timeout: Request timeout in seconds
+            debug: Enable debug logging
+            logger: Optional logger instance for output
         """
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
+        self.debug = debug
+        self.logger = logger
 
         # Configure timeout with longer read timeout for streaming
         timeout_config = httpx.Timeout(
@@ -62,11 +66,24 @@ class VEOClient:
             "Content-Type": "application/json"
         }
 
+    def _log(self, message: str, level: str = "info"):
+        """Log message if logger is available."""
+        if self.logger:
+            if level == "error":
+                self.logger.error(message)
+            elif level == "warning":
+                self.logger.warning(message)
+            elif level == "debug":
+                self.logger.debug(message)
+            else:
+                self.logger.info(message)
+
     async def _request_with_retry(
         self,
         method: str,
         url: str,
         max_retries: int = 3,
+        on_retry=None,
         **kwargs
     ) -> httpx.Response:
         """
@@ -76,6 +93,7 @@ class VEOClient:
             method: HTTP method (GET, POST, etc.)
             url: Request URL
             max_retries: Maximum number of retry attempts
+            on_retry: Optional callback function called on retry (retry_num, delay)
             **kwargs: Additional arguments for httpx.request
 
         Returns:
@@ -90,34 +108,67 @@ class VEOClient:
 
         for attempt in range(max_retries):
             try:
+                if self.debug:
+                    self._log(f"API Request: {method} {url}", "debug")
+                
                 response = await self.client.request(method, url, **kwargs)
+                
+                if self.debug:
+                    self._log(f"API Response: {response.status_code}", "debug")
+                
                 response.raise_for_status()
                 return response
 
             except httpx.HTTPStatusError as e:
+                error_detail = e.response.text[:200] if e.response.text else "No details"
+                
                 if e.response.status_code == 429:  # Rate limit
                     retry_after = int(e.response.headers.get('Retry-After', 60))
+                    self._log(f"Rate limited. Waiting {retry_after}s before retry...", "warning")
+                    
+                    if on_retry:
+                        on_retry(attempt + 1, retry_after)
+                    
                     await asyncio.sleep(retry_after)
                     continue
 
                 elif e.response.status_code == 401:  # Auth error
-                    raise AuthenticationError("Invalid API key")
+                    self._log(f"Authentication failed: {error_detail}", "error")
+                    raise AuthenticationError(f"Invalid API key: {error_detail}")
 
                 elif e.response.status_code == 402:  # Payment required / Quota exceeded
-                    raise QuotaExceededError("API quota exceeded")
+                    self._log(f"Quota exceeded: {error_detail}", "error")
+                    raise QuotaExceededError(f"API quota exceeded: {error_detail}")
 
                 elif e.response.status_code >= 500:  # Server error
                     if attempt < max_retries - 1:
-                        await asyncio.sleep(base_delay * (2 ** attempt))
+                        delay = base_delay * (2 ** attempt)
+                        self._log(f"Server error (attempt {attempt + 1}/{max_retries}). Retrying in {delay}s...", "warning")
+                        
+                        if on_retry:
+                            on_retry(attempt + 1, delay)
+                        
+                        await asyncio.sleep(delay)
                         continue
-                raise NetworkError(f"HTTP {e.response.status_code}: {e.response.text}")
+                    
+                self._log(f"HTTP error {e.response.status_code}: {error_detail}", "error")
+                raise NetworkError(f"HTTP {e.response.status_code}: {error_detail}")
 
             except (httpx.NetworkError, httpx.TimeoutException) as e:
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(base_delay * (2 ** attempt))
+                    delay = base_delay * (2 ** attempt)
+                    self._log(f"Network error (attempt {attempt + 1}/{max_retries}). Retrying in {delay}s...", "warning")
+                    
+                    if on_retry:
+                        on_retry(attempt + 1, delay)
+                    
+                    await asyncio.sleep(delay)
                     continue
+                
+                self._log(f"Network error: {str(e)}", "error")
                 raise NetworkError(f"Failed to connect to VEO API: {str(e)}")
 
+        self._log(f"Max retries ({max_retries}) exceeded", "error")
         raise NetworkError(f"Max retries ({max_retries}) exceeded")
 
     async def get_quota(self) -> Dict[str, Any]:
@@ -175,7 +226,13 @@ class VEOClient:
         }
 
         try:
+            if self.debug:
+                self._log(f"Starting text-to-video stream: {prompt[:50]}...", "debug")
+            
             async with self.client.stream('POST', url, json=payload, headers=headers) as response:
+                if self.debug:
+                    self._log(f"Stream connected: {response.status_code}", "debug")
+                
                 response.raise_for_status()
                 yield response
         except httpx.HTTPStatusError as e:
