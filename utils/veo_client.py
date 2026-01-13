@@ -233,10 +233,12 @@ class VEOClient:
                 if self.debug:
                     self._log(f"Stream connected: {response.status_code}", "debug")
                 
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    await response.aread()
+                    response.raise_for_status()
+                
                 yield response
         except httpx.HTTPStatusError as e:
-            await e.response.aread()
             if e.response.status_code == 401:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
@@ -293,10 +295,11 @@ class VEOClient:
 
         try:
             async with self.client.stream('POST', url, files=files, data=data, headers=headers) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    await response.aread()
+                    response.raise_for_status()
                 yield response
         except httpx.HTTPStatusError as e:
-            await e.response.aread()
             if e.response.status_code == 401:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
@@ -345,10 +348,11 @@ class VEOClient:
 
         try:
             async with self.client.stream('POST', url, files=files, data=data, headers=headers) as response:
-                response.raise_for_status()
+                if response.status_code >= 400:
+                    await response.aread()
+                    response.raise_for_status()
                 yield response
         except httpx.HTTPStatusError as e:
-            await e.response.aread()
             if e.response.status_code == 401:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
@@ -413,17 +417,24 @@ class VEOClient:
                 async with self.client.stream('POST', url, files=files, data=data, headers=headers) as response:
                     if self.debug:
                         self._log(f"Stream connected: {response.status_code}", "debug")
-                    response.raise_for_status()
+                    
+                    if response.status_code >= 400:
+                        await response.aread()
+                        response.raise_for_status()
+                    
                     yield response
             else:
                 # No files, use form data only
                 async with self.client.stream('POST', url, data=data, headers=headers) as response:
                     if self.debug:
                         self._log(f"Stream connected: {response.status_code}", "debug")
-                    response.raise_for_status()
+                    
+                    if response.status_code >= 400:
+                        await response.aread()
+                        response.raise_for_status()
+                    
                     yield response
         except httpx.HTTPStatusError as e:
-            await e.response.aread()
             if e.response.status_code == 401:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
