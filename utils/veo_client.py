@@ -78,6 +78,51 @@ class VEOClient:
             else:
                 self.logger.info(message)
 
+    def _parse_error_response(self, response_text: str, content_type: str = "") -> str:
+        """
+        Parse error response and return user-friendly message.
+
+        Detects HTML responses (maintenance pages) and provides clear messages
+        instead of showing raw HTML to users.
+
+        Args:
+            response_text: Response body text
+            content_type: Content-Type header value
+
+        Returns:
+            User-friendly error message
+        """
+        # Check if response is HTML
+        is_html = (
+            'text/html' in content_type.lower() or
+            response_text.strip().startswith('<!DOCTYPE') or
+            response_text.strip().startswith('<html')
+        )
+
+        if is_html:
+            # Check for maintenance page
+            if 'maintenance' in response_text.lower():
+                return (
+                    "🚧 VEO API is currently under maintenance.\n\n"
+                    "Please try again in 15-30 minutes.\n\n"
+                    "Check status at:\n"
+                    "- Website: https://genaipro.vn\n"
+                    "- Telegram: https://t.me/genaipro_vn"
+                )
+            else:
+                return (
+                    "⚠️ VEO API returned an unexpected response.\n\n"
+                    "The server may be experiencing issues. Please try again later.\n\n"
+                    "If the problem persists, contact support at:\n"
+                    "- Telegram: https://t.me/genaipro_vn\n"
+                    "- Facebook: https://www.facebook.com/genaipro.vn"
+                )
+
+        # Return original error text (truncated if too long)
+        if len(response_text) > 200:
+            return response_text[:200] + "..."
+        return response_text
+
     async def _request_with_retry(
         self,
         method: str,
@@ -243,7 +288,11 @@ class VEOClient:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
                 raise QuotaExceededError("API quota exceeded")
-            raise VideoGenerationError(f"Video generation failed: {e.response.text}")
+
+            # Parse error response (handles HTML maintenance pages)
+            content_type = e.response.headers.get('content-type', '')
+            error_msg = self._parse_error_response(e.response.text, content_type)
+            raise VideoGenerationError(f"Video generation failed:\n\n{error_msg}")
         except httpx.ReadError as e:
             raise NetworkError(f"Connection closed unexpectedly. Please try again: {str(e)}")
         except httpx.RemoteProtocolError as e:
@@ -312,7 +361,11 @@ class VEOClient:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
                 raise QuotaExceededError("API quota exceeded")
-            raise VideoGenerationError(f"Video generation failed: {e.response.text}")
+
+            # Parse error response (handles HTML maintenance pages)
+            content_type = e.response.headers.get('content-type', '')
+            error_msg = self._parse_error_response(e.response.text, content_type)
+            raise VideoGenerationError(f"Video generation failed:\n\n{error_msg}")
         except httpx.ReadError as e:
             raise NetworkError(f"Connection closed unexpectedly. Please try again: {str(e)}")
         except httpx.RemoteProtocolError as e:
@@ -365,7 +418,11 @@ class VEOClient:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
                 raise QuotaExceededError("API quota exceeded")
-            raise VideoGenerationError(f"Video generation failed: {e.response.text}")
+
+            # Parse error response (handles HTML maintenance pages)
+            content_type = e.response.headers.get('content-type', '')
+            error_msg = self._parse_error_response(e.response.text, content_type)
+            raise VideoGenerationError(f"Video generation failed:\n\n{error_msg}")
         except httpx.ReadError as e:
             raise NetworkError(f"Connection closed unexpectedly. Please try again: {str(e)}")
         except httpx.RemoteProtocolError as e:
@@ -447,7 +504,11 @@ class VEOClient:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
                 raise QuotaExceededError("API quota exceeded")
-            raise VideoGenerationError(f"Image generation failed: {e.response.text}")
+
+            # Parse error response (handles HTML maintenance pages)
+            content_type = e.response.headers.get('content-type', '')
+            error_msg = self._parse_error_response(e.response.text, content_type)
+            raise VideoGenerationError(f"Image generation failed:\n\n{error_msg}")
         except httpx.ReadError as e:
             raise NetworkError(f"Connection closed unexpectedly. Please try again: {str(e)}")
         except httpx.RemoteProtocolError as e:

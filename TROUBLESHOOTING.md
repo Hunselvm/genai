@@ -129,6 +129,36 @@ API quota exceeded
 
 ---
 
+### ❌ VEO API Maintenance
+
+**Error Message:**
+```
+🚧 VEO API is currently under maintenance.
+Please try again in 15-30 minutes.
+```
+
+**What It Means:**
+The VEO API servers are temporarily offline for maintenance or updates.
+
+**Solutions:**
+
+1. **Wait and Try Again**
+   - Maintenance usually takes 15-30 minutes
+   - Don't keep retrying immediately
+   - Check back in 30 minutes
+
+2. **Check API Status**
+   - Visit https://genaipro.vn to see status updates
+   - Check Telegram: https://t.me/genaipro_vn
+   - Follow Facebook: https://www.facebook.com/genaipro.vn
+
+3. **Check History Later**
+   - Your video may have been queued before maintenance
+   - Check the History page after maintenance is complete
+   - Videos submitted before maintenance should still process
+
+---
+
 ### ❌ Video Generation Failed
 
 **Error Message:**
@@ -152,6 +182,12 @@ Video generation failed: [various reasons]
    - Generate 1 video instead of multiple
    - Use shorter prompt
    - Try different aspect ratio
+
+4. **API Server Issues**
+   - If you see HTML or unexpected error messages
+   - The API server may be experiencing issues
+   - Wait a few minutes and try again
+   - Check status at https://genaipro.vn
 
 ---
 
