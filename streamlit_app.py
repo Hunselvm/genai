@@ -132,7 +132,11 @@ with st.sidebar:
                     st.success("✅ API key is valid!")
 
                 except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+                    # Ignore harmless transport errors as requested
+                    if "TCPTransport closed" in str(e) or "handler is closed" in str(e):
+                        pass
+                    else:
+                        st.error(f"❌ Error: {str(e)}")
 
     # Display quota if available
     if st.session_state.quota_info:
