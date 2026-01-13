@@ -258,7 +258,8 @@ class VEOClient:
         self,
         start_frame_path: str,
         end_frame_path: Optional[str],
-        prompt: str
+        prompt: str,
+        aspect_ratio: str = "VIDEO_ASPECT_RATIO_LANDSCAPE"
     ) -> AsyncGenerator[httpx.Response, None]:
         """
         Stream SSE response for frames-to-video generation.
@@ -267,6 +268,7 @@ class VEOClient:
             start_frame_path: Path to start frame image
             end_frame_path: Path to end frame image (optional)
             prompt: Text description for video
+            aspect_ratio: VIDEO_ASPECT_RATIO_LANDSCAPE or VIDEO_ASPECT_RATIO_PORTRAIT
 
         Yields:
             httpx.Response with SSE stream
@@ -291,7 +293,10 @@ class VEOClient:
                 end_frame_data = f.read()
             files['end_image'] = ('end_image.jpg', end_frame_data, 'image/jpeg')
 
-        data = {'prompt': prompt}
+        data = {
+            'prompt': prompt,
+            'aspect_ratio': aspect_ratio
+        }
 
         try:
             async with self.client.stream('POST', url, files=files, data=data, headers=headers) as response:

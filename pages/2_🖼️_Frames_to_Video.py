@@ -89,6 +89,15 @@ prompt = st.text_area(
     help="Describe what should happen in the video"
 )
 
+# Aspect Ratio selector
+aspect_ratio = st.selectbox(
+    "Aspect Ratio",
+    options=["VIDEO_ASPECT_RATIO_LANDSCAPE", "VIDEO_ASPECT_RATIO_PORTRAIT"],
+    format_func=lambda x: "Landscape (16:9)" if x == "VIDEO_ASPECT_RATIO_LANDSCAPE" else "Portrait (9:16)",
+    index=0,
+    help="Select the aspect ratio for the generated video"
+)
+
 # Generate button
 if st.button("🎬 Generate Video from Frames", use_container_width=True):
     if not start_frame:
@@ -156,7 +165,8 @@ if st.button("🎬 Generate Video from Frames", use_container_width=True):
                     async with client.frames_to_video_stream(
                         start_frame_path=start_frame_path,
                         end_frame_path=end_frame_path,
-                        prompt=prompt
+                        prompt=prompt,
+                        aspect_ratio=aspect_ratio
                     ) as response:
                         if logger:
                             logger.success("Stream connection established!")
