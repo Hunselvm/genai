@@ -283,7 +283,7 @@ class VEOClient:
             start_frame_data = f.read()
 
         files = {
-            'image': ('image.jpg', start_frame_data, 'image/jpeg')
+            'start_image': ('start_image.jpg', start_frame_data, 'image/jpeg')
         }
 
         if end_frame_path:
