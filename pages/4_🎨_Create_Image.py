@@ -83,7 +83,7 @@ with st.form("create_image_form"):
             help="Generate 1-4 images at once"
         )
 
-    submit_button = st.form_submit_button("🎨 Generate Images", use_container_width=True)
+    submit_button = st.form_submit_button("🎨 Generate Images", width='stretch')
 
 # Process form submission
 if submit_button:
@@ -257,14 +257,14 @@ if submit_button:
                     if file_urls:
                         # Display images in columns
                         if len(file_urls) == 1:
-                            st.image(file_urls[0], use_container_width=True)
-                            st.link_button("⬇️ Download Image", file_urls[0], use_container_width=True)
+                            st.image(file_urls[0], width='stretch')
+                            st.link_button("⬇️ Download Image", file_urls[0], width='stretch')
                         else:
                             cols = st.columns(min(len(file_urls), 2))
                             for idx, img_url in enumerate(file_urls):
                                 with cols[idx % 2]:
                                     st.image(img_url, caption=f"Image {idx + 1}")
-                                    st.link_button(f"⬇️ Download #{idx + 1}", img_url, use_container_width=True, key=f"download_{idx}")
+                                    st.link_button(f"⬇️ Download #{idx + 1}", img_url, width='stretch', key=f"download_{idx}")
 
                         # Image details
                         with st.expander("ℹ️ Image Details"):

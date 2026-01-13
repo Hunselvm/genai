@@ -31,11 +31,11 @@ with col2:
     page_size = st.selectbox("Items per page", options=[10, 20, 50, 100], index=1)
 
 with col3:
-    if st.button("🔄 Refresh History", use_container_width=True):
+    if st.button("🔄 Refresh History", width='stretch'):
         st.rerun()
 
 # Load history
-if st.button("📥 Load History", use_container_width=True) or 'history_loaded' in st.session_state:
+if st.button("📥 Load History", width='stretch') or 'history_loaded' in st.session_state:
     st.session_state.history_loaded = True
 
     with st.spinner("Loading history..."):
@@ -105,8 +105,8 @@ if st.button("📥 Load History", use_container_width=True) or 'history_loaded' 
 
                             # Action buttons
                             if item.get('file_url'):
-                                st.link_button("🔗 View Video", item['file_url'], use_container_width=True)
-                                st.link_button("⬇️ Download", item['file_url'], use_container_width=True, help="Right-click and 'Save As' to download")
+                                st.link_button("🔗 View Video", item['file_url'], width='stretch')
+                                st.link_button("⬇️ Download", item['file_url'], width='stretch', help="Right-click and 'Save As' to download")
 
                         # Video preview if available
                         if item.get('file_url'):
