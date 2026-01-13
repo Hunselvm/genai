@@ -102,6 +102,7 @@ if st.button("📥 Load History", use_container_width=True) or 'history_loaded' 
                             # Action buttons
                             if item.get('file_url'):
                                 st.link_button("🔗 View Video", item['file_url'], use_container_width=True)
+                                st.link_button("⬇️ Download", item['file_url'], use_container_width=True, help="Right-click and 'Save As' to download")
 
                         # Video preview if available
                         if item.get('file_url'):

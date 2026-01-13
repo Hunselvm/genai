@@ -161,6 +161,7 @@ if submit_button:
                 async def generate():
                     result = None
                     event_count = 0
+                    video_started = False
                     
                     async with client.text_to_video_stream(
                         prompt=prompt,
@@ -172,6 +173,7 @@ if submit_button:
                         
                         async for event_data in parse_sse_stream(response, logger=logger):
                             event_count += 1
+                            video_started = True
                             
                             # Update progress
                             progress = event_data.get('process_percentage', 0)
@@ -195,17 +197,67 @@ if submit_button:
                                     logger.error(f"Generation failed: {error_msg}")
                                 raise Exception(error_msg)
                     
-                    # Check if we received any events at all
+                    # If no events received, try polling history
                     if event_count == 0:
                         if logger:
-                            logger.error("No events received from API!")
-                        raise Exception(
-                            "API returned empty response. This usually means:\\n"
-                            "- Your API quota is exhausted\\n"
-                            "- Rate limiting is active\\n"
-                            "- API authentication issue\\n"
-                            "Please check your quota in the sidebar."
-                        )
+                            logger.warning("No SSE events received. Switching to polling mode...")
+                            logger.info("Video generation started in background. Checking history...")
+                        
+                        status_text.text("⏳ Video queued for generation. Checking status...")
+                        
+                        # Poll history for recent videos
+                        max_polls = 60  # Poll for up to 5 minutes (60 * 5 seconds)
+                        poll_interval = 5  # Check every 5 seconds
+                        
+                        for poll_count in range(max_polls):
+                            await asyncio.sleep(poll_interval)
+                            
+                            elapsed = time.time() - start_time
+                            time_text.caption(f"Polling... ({poll_count + 1}/{max_polls}) | Elapsed: {elapsed:.0f}s")
+                            
+                            try:
+                                # Get recent history
+                                history = await client.get_histories(page=1, page_size=5)
+                                
+                                if history and history.get('data'):
+                                    # Look for our video (most recent with matching prompt)
+                                    for item in history['data']:
+                                        item_prompt = item.get('prompt', '')
+                                        item_status = item.get('status', '')
+                                        
+                                        # Check if this might be our video
+                                        if prompt.lower() in item_prompt.lower():
+                                            if logger:
+                                                logger.info(f"Found matching video: {item_status}")
+                                            
+                                            if item_status == 'completed':
+                                                result = item
+                                                if logger:
+                                                    logger.success("Video generation completed!")
+                                                break
+                                            elif item_status == 'processing':
+                                                progress_bar.progress(0.5)
+                                                status_text.text(f"Status: PROCESSING (polling)")
+                                            elif item_status == 'failed':
+                                                error_msg = item.get('error', 'Generation failed')
+                                                if logger:
+                                                    logger.error(f"Generation failed: {error_msg}")
+                                                raise Exception(error_msg)
+                                    
+                                    if result:
+                                        break
+                            
+                            except Exception as e:
+                                if logger:
+                                    logger.warning(f"Polling error: {str(e)}")
+                        
+                        if not result:
+                            if logger:
+                                logger.warning("Polling timeout. Video may still be processing.")
+                            raise Exception(
+                                "Video generation is taking longer than expected.\n"
+                                "Please check the History page in a few minutes to see your video."
+                            )
 
                     await client.close()
                     return result
@@ -231,10 +283,13 @@ if submit_button:
                         # Display video
                         st.video(result['file_url'])
 
-                        col1, col2 = st.columns(2)
+                        col1, col2, col3 = st.columns(3)
                         with col1:
                             st.link_button("🔗 Open in New Tab", result['file_url'])
                         with col2:
+                            # Download button
+                            st.link_button("⬇️ Download Video", result['file_url'], help="Right-click and 'Save As' to download")
+                        with col3:
                             if st.button("📋 Copy URL"):
                                 st.code(result['file_url'], language=None)
 
@@ -247,6 +302,8 @@ if submit_button:
                                 "file_url": result.get('file_url'),
                                 "created_at": result.get('created_at'),
                             })
+                    else:
+                        st.warning("Video URL not available yet. Check the History page.")
 
                     # Update quota
                     if st.session_state.quota_info:
