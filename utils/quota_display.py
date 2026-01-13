@@ -36,7 +36,11 @@ def display_quota():
                     asyncio.run(client.close())
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Failed to refresh: {str(e)}")
+                    # Ignore harmless transport errors as requested
+                    if "TCPTransport closed" in str(e) or "handler is closed" in str(e):
+                        pass
+                    else:
+                        st.error(f"Failed to refresh: {str(e)}")
         
         st.divider()
     else:
