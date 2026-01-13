@@ -236,6 +236,7 @@ class VEOClient:
                 response.raise_for_status()
                 yield response
         except httpx.HTTPStatusError as e:
+            await e.response.aread()
             if e.response.status_code == 401:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
@@ -295,6 +296,7 @@ class VEOClient:
                 response.raise_for_status()
                 yield response
         except httpx.HTTPStatusError as e:
+            await e.response.aread()
             if e.response.status_code == 401:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
@@ -346,6 +348,7 @@ class VEOClient:
                 response.raise_for_status()
                 yield response
         except httpx.HTTPStatusError as e:
+            await e.response.aread()
             if e.response.status_code == 401:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
@@ -420,6 +423,7 @@ class VEOClient:
                     response.raise_for_status()
                     yield response
         except httpx.HTTPStatusError as e:
+            await e.response.aread()
             if e.response.status_code == 401:
                 raise AuthenticationError("Invalid API key")
             elif e.response.status_code == 402:
