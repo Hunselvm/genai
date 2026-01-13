@@ -324,12 +324,49 @@ if uploaded_file:
 
         st.success(f"✅ Loaded {len(batch_items)} prompts from {uploaded_file.name}")
 
-        # Preview
-        with st.expander("📄 Preview Prompts"):
-            for item in batch_items[:10]:  # Show first 10
-                st.text(f"{item['id']}: {item['prompt']} ({item['number_of_videos']} videos)")
+        # Editable Preview
+        with st.expander("� Edit Prompts", expanded=True):
+            st.info("💡 You can edit the prompts, IDs, and number of videos before generating")
+            
+            # Create editable inputs for each prompt
+            for idx, item in enumerate(batch_items):
+                st.divider()
+                col1, col2 = st.columns([1, 3])
+                
+                with col1:
+                    # Editable ID
+                    new_id = st.text_input(
+                        "ID",
+                        value=item['id'],
+                        key=f"id_{idx}",
+                        help="Unique identifier for this prompt"
+                    )
+                    batch_items[idx]['id'] = new_id
+                    
+                    # Editable number of videos
+                    new_num = st.number_input(
+                        "# Videos",
+                        min_value=1,
+                        max_value=4,
+                        value=item['number_of_videos'],
+                        key=f"num_{idx}",
+                        help="Number of videos to generate (1-4)"
+                    )
+                    batch_items[idx]['number_of_videos'] = new_num
+                
+                with col2:
+                    # Editable prompt
+                    new_prompt = st.text_area(
+                        f"Prompt {idx + 1}",
+                        value=item['prompt'],
+                        key=f"prompt_{idx}",
+                        height=100,
+                        help="Edit the prompt text"
+                    )
+                    batch_items[idx]['prompt'] = new_prompt
+            
             if len(batch_items) > 10:
-                st.caption(f"... and {len(batch_items) - 10} more")
+                st.caption(f"Showing all {len(batch_items)} prompts")
 
     except Exception as e:
         st.error(f"❌ Failed to parse file: {str(e)}")
