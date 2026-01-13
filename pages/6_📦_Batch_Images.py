@@ -136,70 +136,106 @@ class BatchImageGenerator:
         prompt: str,
         aspect_ratio: str,
         number_of_images: int,
-        reference_image_path: Optional[str] = None
+        reference_image_path: Optional[str] = None,
+        max_retries: int = 3
     ) -> Optional[Dict]:
-        """Generate images for a single prompt."""
-        try:
-            self.progress[prompt_id] = {'status': 'processing', 'percentage': 0}
+        """Generate images for a single prompt with retry logic for reCAPTCHA errors."""
+        retry_count = 0
+        base_delay = 2  # Start with 2 seconds
+        
+        while retry_count <= max_retries:
+            try:
+                self.progress[prompt_id] = {
+                    'status': 'processing', 
+                    'percentage': 0,
+                    'retry': retry_count if retry_count > 0 else None
+                }
 
-            reference_images = [reference_image_path] if reference_image_path else None
+                reference_images = [reference_image_path] if reference_image_path else None
 
-            async with self.client.create_image_stream(
-                prompt=prompt,
-                aspect_ratio=aspect_ratio,
-                number_of_images=number_of_images,
-                reference_images=reference_images
-            ) as response:
-                async for event_data in parse_sse_stream(response, logger=self.logger):
-                    # Update progress
-                    percentage = event_data.get('process_percentage', 0)
-                    status = event_data.get('status', 'processing')
+                async with self.client.create_image_stream(
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    number_of_images=number_of_images,
+                    reference_images=reference_images
+                ) as response:
+                    async for event_data in parse_sse_stream(response, logger=self.logger):
+                        # Update progress
+                        percentage = event_data.get('process_percentage', 0)
+                        status = event_data.get('status', 'processing')
 
-                    self.progress[prompt_id] = {
-                        'status': status,
-                        'percentage': percentage
-                    }
-
-                    if status == 'completed':
-                        # Check if file_url is missing, fetch from history
-                        if not event_data.get('file_url') and not event_data.get('file_urls'):
-                            if self.logger:
-                                self.logger.warning(f"Result for '{prompt_id}' missing file_url, fetching from history...")
-
-                            try:
-                                history = await self.client.get_histories(page=1, page_size=5)
-                                for item in history.get('data', []):
-                                    if prompt.lower() in item.get('prompt', '').lower():
-                                        event_data = item
-                                        if self.logger:
-                                            self.logger.success(f"Found video in history for '{prompt_id}'")
-                                        break
-                            except Exception as e:
-                                if self.logger:
-                                    self.logger.error(f"Failed to fetch from history: {str(e)}")
-
-                        self.results[prompt_id] = {
-                            'status': 'completed',
-                            'data': event_data,
-                            'prompt': prompt,
-                            'number_of_images': number_of_images
+                        self.progress[prompt_id] = {
+                            'status': status,
+                            'percentage': percentage,
+                            'retry': retry_count if retry_count > 0 else None
                         }
-                        return event_data
 
-                    elif status == 'failed':
-                        error_msg = event_data.get('error', 'Generation failed')
-                        raise Exception(error_msg)
+                        if status == 'completed':
+                            # Check if file_url is missing, fetch from history
+                            if not event_data.get('file_url') and not event_data.get('file_urls'):
+                                if self.logger:
+                                    self.logger.warning(f"Result for '{prompt_id}' missing file_url, fetching from history...")
 
-        except Exception as e:
-            self.progress[prompt_id] = {'status': 'failed', 'percentage': 0, 'error': str(e)}
-            self.results[prompt_id] = {
-                'status': 'failed',
-                'error': str(e),
-                'prompt': prompt
-            }
-            if self.logger:
-                self.logger.error(f"Failed to generate for '{prompt}': {str(e)}")
-            return None
+                                try:
+                                    history = await self.client.get_histories(page=1, page_size=5)
+                                    for item in history.get('data', []):
+                                        if prompt.lower() in item.get('prompt', '').lower():
+                                            event_data = item
+                                            if self.logger:
+                                                self.logger.success(f"Found video in history for '{prompt_id}'")
+                                            break
+                                except Exception as e:
+                                    if self.logger:
+                                        self.logger.error(f"Failed to fetch from history: {str(e)}")
+
+                            self.results[prompt_id] = {
+                                'status': 'completed',
+                                'data': event_data,
+                                'prompt': prompt,
+                                'number_of_images': number_of_images
+                            }
+                            return event_data
+
+                        elif status == 'failed':
+                            error_msg = event_data.get('error', 'Generation failed')
+                            raise Exception(error_msg)
+
+            except Exception as e:
+                error_str = str(e)
+                
+                # Check if it's a reCAPTCHA error (403)
+                is_recaptcha_error = '403' in error_str and 'recaptcha' in error_str.lower()
+                
+                if is_recaptcha_error and retry_count < max_retries:
+                    retry_count += 1
+                    delay = base_delay * (2 ** (retry_count - 1))  # Exponential backoff: 2s, 4s, 8s
+                    
+                    if self.logger:
+                        self.logger.warning(f"reCAPTCHA error for '{prompt_id}', retrying in {delay}s (attempt {retry_count}/{max_retries})...")
+                    
+                    self.progress[prompt_id] = {
+                        'status': 'retrying',
+                        'percentage': 0,
+                        'retry': retry_count,
+                        'delay': delay
+                    }
+                    
+                    await asyncio.sleep(delay)
+                    continue  # Retry
+                else:
+                    # Final failure or non-retryable error
+                    self.progress[prompt_id] = {'status': 'failed', 'percentage': 0, 'error': error_str}
+                    self.results[prompt_id] = {
+                        'status': 'failed',
+                        'error': error_str,
+                        'prompt': prompt
+                    }
+                    if self.logger:
+                        self.logger.error(f"Failed to generate for '{prompt}': {error_str}")
+                    return None
+        
+        # Should not reach here, but just in case
+        return None
 
     async def generate_batch(
         self,
@@ -402,14 +438,20 @@ if batch_items and st.button("🚀 Generate All Images", width='stretch', type="
                     progress_info = generator.progress.get(prompt_id, {'status': 'pending', 'percentage': 0})
                     status = progress_info['status']
                     percentage = progress_info.get('percentage', 0)
+                    retry = progress_info.get('retry')
 
                     if status == 'completed':
-                        placeholder.success(f"✅ {prompt_id}: Completed")
+                        retry_text = f" (after {retry} retries)" if retry else ""
+                        placeholder.success(f"✅ {prompt_id}: Completed{retry_text}")
                     elif status == 'failed':
                         error = progress_info.get('error', 'Unknown error')
                         placeholder.error(f"❌ {prompt_id}: Failed - {error[:100]}")
+                    elif status == 'retrying':
+                        delay = progress_info.get('delay', 0)
+                        placeholder.warning(f"🔄 {prompt_id}: Retrying in {delay}s (attempt {retry}/3)...")
                     elif status == 'processing':
-                        placeholder.info(f"⏳ {prompt_id}: Processing... {percentage}%")
+                        retry_text = f" (retry {retry}/3)" if retry else ""
+                        placeholder.info(f"⏳ {prompt_id}: Processing... {percentage}%{retry_text}")
                     else:
                         placeholder.text(f"⏸️ {prompt_id}: Pending...")
 
