@@ -78,7 +78,7 @@ with st.form("text_to_video_form"):
             help="Generate 1-4 videos at once"
         )
 
-    submit_button = st.form_submit_button("🎬 Generate Video", use_container_width=True)
+    submit_button = st.form_submit_button("🎬 Generate Video", width='stretch')
 
 # Process form submission
 if submit_button:

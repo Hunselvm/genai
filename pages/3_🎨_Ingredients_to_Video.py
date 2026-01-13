@@ -70,7 +70,7 @@ if reference_images:
     cols = st.columns(4)
     for idx, img in enumerate(reference_images):
         with cols[idx % 4]:
-            st.image(img, caption=f"Image {idx+1}", use_container_width=True)
+            st.image(img, caption=f"Image {idx+1}", width='stretch')
 
 # Prompt input
 prompt = st.text_area(
@@ -81,7 +81,7 @@ prompt = st.text_area(
 )
 
 # Generate button
-if st.button("🎬 Generate Video from Ingredients", use_container_width=True):
+if st.button("🎬 Generate Video from Ingredients", width='stretch'):
     if not reference_images:
         st.error("Please upload at least one reference image!")
     elif not prompt.strip():

@@ -286,7 +286,7 @@ if batch_items:
     if reference_image:
         col1, col2 = st.columns([1, 2])
         with col1:
-            st.image(reference_image, caption="Reference Image", use_container_width=True)
+            st.image(reference_image, caption="Reference Image", width='stretch')
         with col2:
             st.info("💡 This reference image will be used for all image generations in the batch.")
 
@@ -334,7 +334,7 @@ if batch_items:
 # UI - Generate Button & Progress Tracking
 # ============================================================================
 
-if batch_items and st.button("🚀 Generate All Images", use_container_width=True, type="primary"):
+if batch_items and st.button("🚀 Generate All Images", width='stretch', type="primary"):
     # Create containers
     progress_container = st.container()
     debug_container = st.container() if debug_mode else None
@@ -480,7 +480,7 @@ if batch_items and st.button("🚀 Generate All Images", use_container_width=Tru
                                 for idx, img_url in enumerate(file_urls):
                                     if img_url:  # Skip None values
                                         with cols[idx % 3]:
-                                            st.image(img_url, caption=f"Image {idx + 1}", use_container_width=True)
+                                            st.image(img_url, caption=f"Image {idx + 1}", width='stretch')
                                             st.link_button(
                                                 f"⬇️ Download #{idx + 1}",
                                                 img_url,
@@ -509,8 +509,6 @@ if batch_items and st.button("🚀 Generate All Images", use_container_width=Tru
                     st.session_state.quota_info = quota
                 except:
                     pass
-
-            await client.close()
 
         except AuthenticationError as e:
             st.error(f"🔐 Authentication Error: {str(e)}")

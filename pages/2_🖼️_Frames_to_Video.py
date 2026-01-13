@@ -67,7 +67,7 @@ with col1:
     )
 
     if start_frame:
-        st.image(start_frame, caption="Start Frame", use_container_width=True)
+        st.image(start_frame, caption="Start Frame", width='stretch')
 
 with col2:
     st.subheader("End Frame (Optional)")
@@ -79,7 +79,7 @@ with col2:
     )
 
     if end_frame:
-        st.image(end_frame, caption="End Frame", use_container_width=True)
+        st.image(end_frame, caption="End Frame", width='stretch')
 
 # Prompt input
 prompt = st.text_area(
@@ -108,7 +108,7 @@ num_videos = st.slider(
 )
 
 # Generate button
-if st.button("🎬 Generate Video from Frames", use_container_width=True):
+if st.button("🎬 Generate Video from Frames", width='stretch'):
     if not start_frame:
         st.error("Please upload at least a start frame!")
     elif not prompt.strip():
