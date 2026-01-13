@@ -7,6 +7,7 @@ from utils.sse_handler import parse_sse_stream
 from utils.exceptions import VEOAPIError, AuthenticationError, QuotaExceededError, NetworkError
 from utils.logger import StreamlitLogger
 from utils.quota_display import display_quota
+from utils.sidebar import render_sidebar
 import time
 
 st.set_page_config(page_title="Create Image", page_icon="🎨", layout="wide")
@@ -36,9 +37,12 @@ st.markdown("""
 
 st.title("🎨 AI Image Generation")
 
+# Render Sidebar
+render_sidebar()
+
 # Check API key
 if not st.session_state.get('api_key'):
-    st.error("⚠️ Please enter your API key in the sidebar first!")
+    st.warning("⚠️ Please enter your API key in the sidebar first!")
     st.stop()
 
 # Display quota

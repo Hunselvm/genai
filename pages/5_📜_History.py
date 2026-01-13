@@ -10,13 +10,17 @@ st.set_page_config(page_title="History", page_icon="📜", layout="wide")
 
 st.title("📜 Generation History")
 
+# Render Sidebar
+render_sidebar()
+
 # Check API key
 if not st.session_state.get('api_key'):
-    st.error("⚠️ Please enter your API key in the sidebar first!")
+    st.warning("⚠️ Please enter your API key in the sidebar first!")
     st.stop()
 
 # Display quota
 from utils.quota_display import display_quota
+from utils.sidebar import render_sidebar
 display_quota()
 
 st.markdown("View all your past video generations.")

@@ -46,5 +46,4 @@ def display_quota():
     else:
         # Suggest checking quota
         if st.session_state.get('api_key'):
-            st.info("💡 Click 'Check Quota' in the sidebar to see your available credits")
             st.divider()
