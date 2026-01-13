@@ -28,7 +28,28 @@ class VEOClient:
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
-        self.client = httpx.AsyncClient(timeout=timeout)
+
+        # Configure timeout with longer read timeout for streaming
+        timeout_config = httpx.Timeout(
+            timeout=10.0,      # Connection timeout
+            read=timeout,       # Read timeout (for SSE streaming)
+            write=30.0,         # Write timeout
+            pool=5.0            # Pool timeout
+        )
+
+        # Configure limits for connection pooling
+        limits = httpx.Limits(
+            max_keepalive_connections=5,
+            max_connections=10,
+            keepalive_expiry=30.0
+        )
+
+        # Create client with proper configuration
+        self.client = httpx.AsyncClient(
+            timeout=timeout_config,
+            limits=limits,
+            follow_redirects=True
+        )
 
     async def close(self):
         """Close the HTTP client."""
@@ -163,6 +184,12 @@ class VEOClient:
             elif e.response.status_code == 402:
                 raise QuotaExceededError("API quota exceeded")
             raise VideoGenerationError(f"Video generation failed: {e.response.text}")
+        except httpx.ReadError as e:
+            raise NetworkError(f"Connection closed unexpectedly. Please try again: {str(e)}")
+        except httpx.RemoteProtocolError as e:
+            raise NetworkError(f"Server connection error. Please try again: {str(e)}")
+        except httpx.ConnectError as e:
+            raise NetworkError(f"Cannot connect to VEO API. Check your internet connection: {str(e)}")
         except (httpx.NetworkError, httpx.TimeoutException) as e:
             raise NetworkError(f"Connection failed: {str(e)}")
 
@@ -216,6 +243,12 @@ class VEOClient:
             elif e.response.status_code == 402:
                 raise QuotaExceededError("API quota exceeded")
             raise VideoGenerationError(f"Video generation failed: {e.response.text}")
+        except httpx.ReadError as e:
+            raise NetworkError(f"Connection closed unexpectedly. Please try again: {str(e)}")
+        except httpx.RemoteProtocolError as e:
+            raise NetworkError(f"Server connection error. Please try again: {str(e)}")
+        except httpx.ConnectError as e:
+            raise NetworkError(f"Cannot connect to VEO API. Check your internet connection: {str(e)}")
         except (httpx.NetworkError, httpx.TimeoutException) as e:
             raise NetworkError(f"Connection failed: {str(e)}")
 
@@ -261,6 +294,12 @@ class VEOClient:
             elif e.response.status_code == 402:
                 raise QuotaExceededError("API quota exceeded")
             raise VideoGenerationError(f"Video generation failed: {e.response.text}")
+        except httpx.ReadError as e:
+            raise NetworkError(f"Connection closed unexpectedly. Please try again: {str(e)}")
+        except httpx.RemoteProtocolError as e:
+            raise NetworkError(f"Server connection error. Please try again: {str(e)}")
+        except httpx.ConnectError as e:
+            raise NetworkError(f"Cannot connect to VEO API. Check your internet connection: {str(e)}")
         except (httpx.NetworkError, httpx.TimeoutException) as e:
             raise NetworkError(f"Connection failed: {str(e)}")
 
