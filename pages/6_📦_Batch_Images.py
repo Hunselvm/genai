@@ -203,15 +203,18 @@ class BatchImageGenerator:
             except Exception as e:
                 error_str = str(e)
                 
-                # Check if it's a reCAPTCHA error (403)
+                # Check if it's a retryable error (403 reCAPTCHA or 500 server error)
                 is_recaptcha_error = '403' in error_str and 'recaptcha' in error_str.lower()
+                is_server_error = '500' in error_str
+                is_retryable = is_recaptcha_error or is_server_error
                 
-                if is_recaptcha_error and retry_count < max_retries:
+                if is_retryable and retry_count < max_retries:
                     retry_count += 1
                     delay = base_delay * (2 ** (retry_count - 1))  # Exponential backoff: 2s, 4s, 8s
                     
+                    error_type = "reCAPTCHA error" if is_recaptcha_error else "Server error"
                     if self.logger:
-                        self.logger.warning(f"reCAPTCHA error for '{prompt_id}', retrying in {delay}s (attempt {retry_count}/{max_retries})...")
+                        self.logger.warning(f"{error_type} for '{prompt_id}', retrying in {delay}s (attempt {retry_count}/{max_retries})...")
                     
                     self.progress[prompt_id] = {
                         'status': 'retrying',
