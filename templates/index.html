@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VEO API Video Generation</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>VEO API Video Generation</h1>
+            <div id="quota-display">
+                <button onclick="loadQuota()">Check Quota</button>
+                <span id="quota-info"></span>
+            </div>
+        </header>
+
+        <main>
+            <div class="tabs">
+                <button class="tab-button active" onclick="openTab('text-to-video')">Text to Video</button>
+                <button class="tab-button" onclick="openTab('frames-to-video')">Frames to Video</button>
+                <button class="tab-button" onclick="openTab('ingredients-to-video')">Ingredients to Video</button>
+                <button class="tab-button" onclick="openTab('history')">History</button>
+            </div>
+
+            <!-- Text to Video Tab -->
+            <div id="text-to-video" class="tab-content active">
+                <h2>Text to Video Generation</h2>
+                <form id="text-to-video-form">
+                    <div class="form-group">
+                        <label for="prompt">Prompt:</label>
+                        <textarea id="prompt" name="prompt" rows="4" required
+                            placeholder="Describe the video you want to generate..."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="aspect-ratio">Aspect Ratio:</label>
+                        <select id="aspect-ratio" name="aspect_ratio" required>
+                            <option value="VIDEO_ASPECT_RATIO_LANDSCAPE">Landscape (16:9)</option>
+                            <option value="VIDEO_ASPECT_RATIO_PORTRAIT">Portrait (9:16)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="num-videos">Number of Videos (1-4):</label>
+                        <input type="number" id="num-videos" name="number_of_videos"
+                            min="1" max="4" value="1" required>
+                    </div>
+
+                    <button type="submit">Generate Video</button>
+                </form>
+
+                <div id="progress" class="progress-container" style="display: none;">
+                    <h3>Progress</h3>
+                    <div class="progress-bar">
+                        <div id="progress-fill" class="progress-fill"></div>
+                    </div>
+                    <p id="progress-text">Initializing...</p>
+                </div>
+
+                <div id="result" class="result-container" style="display: none;">
+                    <h3>Generated Video</h3>
+                    <div id="result-content"></div>
+                </div>
+
+                <div id="error" class="error-container" style="display: none;"></div>
+            </div>
+
+            <!-- Frames to Video Tab -->
+            <div id="frames-to-video" class="tab-content">
+                <h2>Frames to Video Generation</h2>
+                <p>Coming soon: Upload start and end frames to generate video</p>
+            </div>
+
+            <!-- Ingredients to Video Tab -->
+            <div id="ingredients-to-video" class="tab-content">
+                <h2>Ingredients to Video Generation</h2>
+                <p>Coming soon: Upload reference images to generate video</p>
+            </div>
+
+            <!-- History Tab -->
+            <div id="history" class="tab-content">
+                <h2>Generation History</h2>
+                <button onclick="loadHistory()">Load History</button>
+                <div id="history-list"></div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
