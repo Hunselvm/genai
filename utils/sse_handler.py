@@ -31,6 +31,7 @@ async def parse_sse_stream(response: httpx.Response, logger=None) -> AsyncGenera
     event_count = 0
     last_event_time = asyncio.get_event_loop().time()
     timeout_seconds = 30  # Timeout if no events for 30 seconds
+    current_event_type = None  # Track current event type
     
     try:
         if logger:
@@ -53,6 +54,16 @@ async def parse_sse_stream(response: httpx.Response, logger=None) -> AsyncGenera
                     # Try parsing as JSON first
                     event_data = json.loads(data_str)
                     event_count += 1
+                    
+                    # Check if this is an error event (event:error)
+                    if current_event_type == 'error':
+                        error_msg = event_data.get('error', 'Unknown error occurred')
+                        error_code = event_data.get('code', 'Unknown')
+                        if logger:
+                            logger.error(f"API Error ({error_code}): {error_msg}")
+                        # Reset event type
+                        current_event_type = None
+                        raise VideoGenerationError(f"API Error ({error_code}): {error_msg}")
 
                     # Handle array responses (multiple videos or completion with array)
                     if isinstance(event_data, list):
@@ -120,9 +131,11 @@ async def parse_sse_stream(response: httpx.Response, logger=None) -> AsyncGenera
                     }
 
             # Parse event type (optional, for named events)
-            elif line.startswith('event: '):
-                event_name = line[7:]
-                # Could be used for different event types if needed
+            elif line.startswith('event:'):
+                event_type = line[6:].strip()
+                current_event_type = event_type
+                if logger and event_type == 'error':
+                    logger.warning("Error event detected")
                 continue
 
             # Empty line signals end of event
