@@ -98,6 +98,15 @@ aspect_ratio = st.selectbox(
     help="Select the aspect ratio for the generated video"
 )
 
+# Number of videos slider
+num_videos = st.slider(
+    "Number of Videos",
+    min_value=1,
+    max_value=4,
+    value=1,
+    help="Number of videos to generate in parallel"
+)
+
 # Generate button
 if st.button("🎬 Generate Video from Frames", use_container_width=True):
     if not start_frame:
@@ -166,7 +175,8 @@ if st.button("🎬 Generate Video from Frames", use_container_width=True):
                         start_frame_path=start_frame_path,
                         end_frame_path=end_frame_path,
                         prompt=prompt,
-                        aspect_ratio=aspect_ratio
+                        aspect_ratio=aspect_ratio,
+                        number_of_videos=num_videos
                     ) as response:
                         if logger:
                             logger.success("Stream connection established!")

@@ -259,7 +259,8 @@ class VEOClient:
         start_frame_path: str,
         end_frame_path: Optional[str],
         prompt: str,
-        aspect_ratio: str = "VIDEO_ASPECT_RATIO_LANDSCAPE"
+        aspect_ratio: str = "VIDEO_ASPECT_RATIO_LANDSCAPE",
+        number_of_videos: int = 1
     ) -> AsyncGenerator[httpx.Response, None]:
         """
         Stream SSE response for frames-to-video generation.
@@ -269,6 +270,7 @@ class VEOClient:
             end_frame_path: Path to end frame image (optional)
             prompt: Text description for video
             aspect_ratio: VIDEO_ASPECT_RATIO_LANDSCAPE or VIDEO_ASPECT_RATIO_PORTRAIT
+            number_of_videos: Number of videos to generate (1-4)
 
         Yields:
             httpx.Response with SSE stream
@@ -295,7 +297,8 @@ class VEOClient:
 
         data = {
             'prompt': prompt,
-            'aspect_ratio': aspect_ratio
+            'aspect_ratio': aspect_ratio,
+            'number_of_videos': str(number_of_videos)
         }
 
         try:
