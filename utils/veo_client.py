@@ -360,6 +360,80 @@ class VEOClient:
         except (httpx.NetworkError, httpx.TimeoutException) as e:
             raise NetworkError(f"Connection failed: {str(e)}")
 
+    @asynccontextmanager
+    async def create_image_stream(
+        self,
+        prompt: str,
+        aspect_ratio: str,
+        number_of_images: int = 1,
+        reference_images: Optional[List[str]] = None
+    ) -> AsyncGenerator[httpx.Response, None]:
+        """
+        Stream SSE response for image generation.
+
+        Args:
+            prompt: Text description for image
+            aspect_ratio: IMAGE_ASPECT_RATIO_LANDSCAPE, IMAGE_ASPECT_RATIO_PORTRAIT, or IMAGE_ASPECT_RATIO_SQUARE
+            number_of_images: Number of images to generate (1-4)
+            reference_images: Optional list of paths to reference images
+
+        Yields:
+            httpx.Response with SSE stream
+
+        Raises:
+            VideoGenerationError: Image generation failed
+            NetworkError: Connection failed
+        """
+        url = f"{self.base_url}/veo/create-image"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+
+        # Prepare form data
+        data = {
+            'prompt': prompt,
+            'aspect_ratio': aspect_ratio,
+            'number_of_images': str(number_of_images)
+        }
+
+        # Add reference images if provided
+        files = []
+        if reference_images:
+            for idx, img_path in enumerate(reference_images):
+                with open(img_path, 'rb') as f:
+                    image_data = f.read()
+                files.append(('reference_images', (f'ref_{idx}.jpg', image_data, 'image/jpeg')))
+
+        try:
+            if self.debug:
+                self._log(f"Starting image generation: {prompt[:50]}...", "debug")
+            
+            if files:
+                async with self.client.stream('POST', url, files=files, data=data, headers=headers) as response:
+                    if self.debug:
+                        self._log(f"Stream connected: {response.status_code}", "debug")
+                    response.raise_for_status()
+                    yield response
+            else:
+                # No files, use form data only
+                async with self.client.stream('POST', url, data=data, headers=headers) as response:
+                    if self.debug:
+                        self._log(f"Stream connected: {response.status_code}", "debug")
+                    response.raise_for_status()
+                    yield response
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise AuthenticationError("Invalid API key")
+            elif e.response.status_code == 402:
+                raise QuotaExceededError("API quota exceeded")
+            raise VideoGenerationError(f"Image generation failed: {e.response.text}")
+        except httpx.ReadError as e:
+            raise NetworkError(f"Connection closed unexpectedly. Please try again: {str(e)}")
+        except httpx.RemoteProtocolError as e:
+            raise NetworkError(f"Server connection error. Please try again: {str(e)}")
+        except httpx.ConnectError as e:
+            raise NetworkError(f"Cannot connect to VEO API. Check your internet connection: {str(e)}")
+        except (httpx.NetworkError, httpx.TimeoutException) as e:
+            raise NetworkError(f"Connection failed: {str(e)}")
+
     async def get_histories(self, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
         """
         Get video/image generation history.

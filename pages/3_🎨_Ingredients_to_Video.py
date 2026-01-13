@@ -18,6 +18,10 @@ if not st.session_state.get('api_key'):
     st.error("⚠️ Please enter your API key in the sidebar first!")
     st.stop()
 
+# Display quota
+from utils.quota_display import display_quota
+display_quota()
+
 st.markdown("""
 Generate a video using multiple reference images. The AI will use these images
 as visual inspiration and guidance for creating your video.

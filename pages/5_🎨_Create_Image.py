@@ -1,4 +1,4 @@
-"""Text to Video Generation Page"""
+"""Image Generation Page"""
 
 import streamlit as st
 import asyncio
@@ -9,7 +9,7 @@ from utils.logger import StreamlitLogger
 from utils.quota_display import display_quota
 import time
 
-st.set_page_config(page_title="Text to Video", page_icon="📝", layout="wide")
+st.set_page_config(page_title="Create Image", page_icon="🎨", layout="wide")
 
 # Custom CSS
 st.markdown("""
@@ -34,7 +34,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📝 Text to Video Generation")
+st.title("🎨 AI Image Generation")
 
 # Check API key
 if not st.session_state.get('api_key'):
@@ -48,12 +48,12 @@ display_quota()
 debug_mode = st.checkbox("🔍 Enable Debug Mode", value=False, help="Show detailed API communication logs")
 
 # Input form
-with st.form("text_to_video_form"):
+with st.form("create_image_form"):
     prompt = st.text_area(
-        "Video Prompt",
-        placeholder="Describe the video you want to generate...\nExample: A cat playing with a ball in a sunny garden",
+        "Image Prompt",
+        placeholder="Describe the image you want to generate...\nExample: A serene mountain landscape at sunset with a lake reflection",
         height=150,
-        help="Describe what you want to see in the video. Be detailed!"
+        help="Describe what you want to see in the image. Be detailed!"
     )
 
     col1, col2 = st.columns(2)
@@ -62,23 +62,28 @@ with st.form("text_to_video_form"):
         aspect_ratio = st.selectbox(
             "Aspect Ratio",
             options=[
-                "VIDEO_ASPECT_RATIO_LANDSCAPE",
-                "VIDEO_ASPECT_RATIO_PORTRAIT"
+                "IMAGE_ASPECT_RATIO_LANDSCAPE",
+                "IMAGE_ASPECT_RATIO_PORTRAIT",
+                "IMAGE_ASPECT_RATIO_SQUARE"
             ],
-            format_func=lambda x: "Landscape (16:9)" if "LANDSCAPE" in x else "Portrait (9:16)",
-            help="Choose the video orientation"
+            format_func=lambda x: {
+                "IMAGE_ASPECT_RATIO_LANDSCAPE": "Landscape (16:9)",
+                "IMAGE_ASPECT_RATIO_PORTRAIT": "Portrait (9:16)",
+                "IMAGE_ASPECT_RATIO_SQUARE": "Square (1:1)"
+            }[x],
+            help="Choose the image orientation"
         )
 
     with col2:
-        number_of_videos = st.number_input(
-            "Number of Videos",
+        number_of_images = st.number_input(
+            "Number of Images",
             min_value=1,
             max_value=4,
             value=1,
-            help="Generate 1-4 videos at once"
+            help="Generate 1-4 images at once"
         )
 
-    submit_button = st.form_submit_button("🎬 Generate Video", use_container_width=True)
+    submit_button = st.form_submit_button("🎨 Generate Images", use_container_width=True)
 
 # Process form submission
 if submit_button:
@@ -90,7 +95,7 @@ if submit_button:
         debug_container = st.container() if debug_mode else None
 
         with progress_container:
-            st.info(f"🚀 Starting video generation...")
+            st.info(f"🚀 Starting image generation...")
 
             progress_bar = st.progress(0)
             status_text = st.empty()
@@ -120,40 +125,39 @@ if submit_button:
                 )
 
                 if logger:
-                    logger.info(f"Generating video with prompt: {prompt[:50]}...")
+                    logger.info(f"Generating images with prompt: {prompt[:50]}...")
                     logger.info(f"Aspect ratio: {aspect_ratio}")
-                    logger.info(f"Number of videos: {number_of_videos}")
+                    logger.info(f"Number of images: {number_of_images}")
 
-                # Retry callback
-                def on_retry(attempt, delay):
-                    retry_text.warning(f"⏳ Retry attempt {attempt}. Waiting {delay}s...")
-                    if logger:
-                        logger.warning(f"Retrying (attempt {attempt}, delay {delay}s)")
-
-                # Generate video
+                # Generate images
                 async def generate():
                     result = None
                     event_count = 0
-                    video_started = False
                     
-                    async with client.text_to_video_stream(
+                    async with client.create_image_stream(
                         prompt=prompt,
                         aspect_ratio=aspect_ratio,
-                        number_of_videos=number_of_videos
+                        number_of_images=number_of_images
                     ) as response:
                         if logger:
                             logger.success("Stream connection established!")
                         
                         async for event_data in parse_sse_stream(response, logger=logger):
                             event_count += 1
-                            video_started = True
                             
                             # Update progress
-                            progress = event_data.get('process_percentage', 0)
                             status = event_data.get('status', 'processing')
+                            
+                            # Images don't have process_percentage, so estimate
+                            if status == 'completed':
+                                progress = 100
+                            elif status == 'processing':
+                                progress = 50
+                            else:
+                                progress = 25
 
                             progress_bar.progress(progress / 100.0)
-                            status_text.text(f"Status: {status.upper()} - {progress}%")
+                            status_text.text(f"Status: {status.upper()}")
 
                             elapsed = time.time() - start_time
                             time_text.caption(f"Elapsed time: {elapsed:.1f}s | Events received: {event_count}")
@@ -161,7 +165,7 @@ if submit_button:
                             # Check for completion
                             if status == 'completed':
                                 if logger:
-                                    logger.success(f"Video generation completed! (Total events: {event_count})")
+                                    logger.success(f"Image generation completed! (Total events: {event_count})")
                                 result = event_data
                                 break
                             elif status == 'failed':
@@ -174,13 +178,13 @@ if submit_button:
                     if event_count == 0:
                         if logger:
                             logger.warning("No SSE events received. Switching to polling mode...")
-                            logger.info("Video generation started in background. Checking history...")
+                            logger.info("Image generation started in background. Checking history...")
                         
-                        status_text.text("⏳ Video queued for generation. Checking status...")
+                        status_text.text("⏳ Images queued for generation. Checking status...")
                         
-                        # Poll history for recent videos
-                        max_polls = 60  # Poll for up to 5 minutes (60 * 5 seconds)
-                        poll_interval = 5  # Check every 5 seconds
+                        # Poll history for recent images
+                        max_polls = 60
+                        poll_interval = 5
                         
                         for poll_count in range(max_polls):
                             await asyncio.sleep(poll_interval)
@@ -189,24 +193,21 @@ if submit_button:
                             time_text.caption(f"Polling... ({poll_count + 1}/{max_polls}) | Elapsed: {elapsed:.0f}s")
                             
                             try:
-                                # Get recent history
                                 history = await client.get_histories(page=1, page_size=5)
                                 
                                 if history and history.get('data'):
-                                    # Look for our video (most recent with matching prompt)
                                     for item in history['data']:
                                         item_prompt = item.get('prompt', '')
                                         item_status = item.get('status', '')
                                         
-                                        # Check if this might be our video
                                         if prompt.lower() in item_prompt.lower():
                                             if logger:
-                                                logger.info(f"Found matching video: {item_status}")
+                                                logger.info(f"Found matching image: {item_status}")
                                             
                                             if item_status == 'completed':
                                                 result = item
                                                 if logger:
-                                                    logger.success("Video generation completed!")
+                                                    logger.success("Image generation completed!")
                                                 break
                                             elif item_status == 'processing':
                                                 progress_bar.progress(0.5)
@@ -226,10 +227,10 @@ if submit_button:
                         
                         if not result:
                             if logger:
-                                logger.warning("Polling timeout. Video may still be processing.")
+                                logger.warning("Polling timeout. Images may still be processing.")
                             raise Exception(
-                                "Video generation is taking longer than expected.\n"
-                                "Please check the History page in a few minutes to see your video."
+                                "Image generation is taking longer than expected.\n"
+                                "Please check the History page in a few minutes to see your images."
                             )
 
                     await client.close()
@@ -237,7 +238,7 @@ if submit_button:
 
                 # Run async function
                 if logger:
-                    logger.info("Starting async video generation...")
+                    logger.info("Starting async image generation...")
                 
                 result = asyncio.run(generate())
 
@@ -246,37 +247,36 @@ if submit_button:
                     status_text.text("Status: COMPLETED - 100%")
                     retry_text.empty()
 
-                    st.success("✅ Video generated successfully!")
+                    st.success("✅ Images generated successfully!")
 
                     # Display result
                     st.divider()
-                    st.subheader("🎥 Generated Video")
+                    st.subheader("🖼️ Generated Images")
 
-                    if result.get('file_url'):
-                        # Display video
-                        st.video(result['file_url'])
+                    file_urls = result.get('file_urls', [])
+                    if file_urls:
+                        # Display images in columns
+                        if len(file_urls) == 1:
+                            st.image(file_urls[0], use_container_width=True)
+                            st.link_button("⬇️ Download Image", file_urls[0], use_container_width=True)
+                        else:
+                            cols = st.columns(min(len(file_urls), 2))
+                            for idx, img_url in enumerate(file_urls):
+                                with cols[idx % 2]:
+                                    st.image(img_url, caption=f"Image {idx + 1}")
+                                    st.link_button(f"⬇️ Download #{idx + 1}", img_url, use_container_width=True, key=f"download_{idx}")
 
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.link_button("🔗 Open in New Tab", result['file_url'])
-                        with col2:
-                            # Download button
-                            st.link_button("⬇️ Download Video", result['file_url'], help="Right-click and 'Save As' to download")
-                        with col3:
-                            if st.button("📋 Copy URL"):
-                                st.code(result['file_url'], language=None)
-
-                        # Video details
-                        with st.expander("ℹ️ Video Details"):
+                        # Image details
+                        with st.expander("ℹ️ Image Details"):
                             st.json({
-                                "video_id": result.get('id'),
+                                "image_id": result.get('id'),
                                 "prompt": result.get('prompt', prompt),
                                 "status": result.get('status'),
-                                "file_url": result.get('file_url'),
+                                "file_urls": file_urls,
                                 "created_at": result.get('created_at'),
                             })
                     else:
-                        st.warning("Video URL not available yet. Check the History page.")
+                        st.warning("Image URLs not available yet. Check the History page.")
 
                     # Update quota
                     if st.session_state.quota_info:
@@ -296,7 +296,7 @@ if submit_button:
 
             except QuotaExceededError as e:
                 st.error(f"📊 Quota Exceeded: {str(e)}")
-                st.info("💡 **Troubleshooting:**\n- Check your quota in the sidebar\n- Wait for quota to reset\n- Upgrade your plan if needed")
+                st.info("💡 **Troubleshooting:**\n- Check your quota above\n- Wait for quota to reset\n- Upgrade your plan if needed")
                 progress_bar.empty()
                 status_text.empty()
                 time_text.empty()
@@ -333,15 +333,15 @@ with st.expander("💡 Tips for Better Results"):
     st.markdown("""
     **Prompt Writing Tips:**
     - Be specific and descriptive
-    - Include details about setting, lighting, mood
-    - Mention camera movements if desired (pan, zoom, etc.)
-    - Specify time of day or season
-    - Add style descriptors (cinematic, dramatic, etc.)
+    - Include details about style, mood, lighting
+    - Mention art style if desired (realistic, cartoon, oil painting, etc.)
+    - Specify colors and composition
+    - Add quality descriptors (high quality, detailed, professional, etc.)
 
     **Good Examples:**
-    - "A golden retriever running through a meadow at sunset, slow motion, cinematic"
-    - "Close-up of raindrops falling on a window, soft focus background, peaceful mood"
-    - "Aerial view of a city skyline at night, lights twinkling, camera slowly panning"
+    - "A photorealistic mountain landscape at golden hour, with snow-capped peaks reflecting in a crystal clear lake"
+    - "Minimalist logo design of a coffee cup, modern style, black and white, clean lines"
+    - "Fantasy digital art of a dragon flying over a medieval castle, dramatic lighting, vibrant colors"
 
     **Avoid:**
     - Very short or vague prompts
