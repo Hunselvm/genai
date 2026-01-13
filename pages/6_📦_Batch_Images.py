@@ -324,11 +324,11 @@ class BatchImageGenerator:
 # UI - Input Section
 # ============================================================================
 
-if 'batch_items' not in st.session_state:
-    st.session_state.batch_items = []
+if 'batch_image_items' not in st.session_state:
+    st.session_state.batch_image_items = []
 
-if 'last_file_ext' not in st.session_state:
-    st.session_state.last_file_ext = 'txt'
+if 'image_last_file_ext' not in st.session_state:
+    st.session_state.image_last_file_ext = 'txt'
 
 st.subheader("1. Add Prompts")
 
@@ -355,8 +355,8 @@ with input_tab1:
                 
                 is_valid, msg = validate_batch_items(new_items)
                 if is_valid:
-                    st.session_state.batch_items = new_items
-                    st.session_state.last_file_ext = ext
+                    st.session_state.batch_image_items = new_items
+                    st.session_state.image_last_file_ext = ext
                     st.success(f"✅ Loaded {len(new_items)} prompts!")
                     st.rerun()
                 else:
@@ -375,8 +375,8 @@ with input_tab2:
             new_items = parse_txt_file(manual_text)
             is_valid, msg = validate_batch_items(new_items)
             if is_valid:
-                st.session_state.batch_items = new_items
-                st.session_state.last_file_ext = 'txt'
+                st.session_state.batch_image_items = new_items
+                st.session_state.image_last_file_ext = 'txt'
                 st.success(f"✅ Loaded {len(new_items)} prompts!")
                 st.rerun()
             else:
@@ -388,8 +388,8 @@ with input_tab2:
 # UI - Edit & Preview Section
 # ============================================================================
 
-batch_items = st.session_state.batch_items
-file_ext = st.session_state.last_file_ext
+batch_items = st.session_state.batch_image_items
+file_ext = st.session_state.image_last_file_ext
 
 if batch_items:
     st.divider()
@@ -397,7 +397,7 @@ if batch_items:
     
     # Global clear
     if st.button("🗑️ Clear All"):
-        st.session_state.batch_items = []
+        st.session_state.batch_image_items = []
         st.rerun()
 
     # Editable list
@@ -414,28 +414,25 @@ if batch_items:
                 # ID and Count
                 new_id = st.text_input(
                     "ID", 
-                    value=item['id'], 
+                    value=item.get('id', f"prompt_{idx}"), 
                     key=f"id_{ui_key}",
                     label_visibility="collapsed",
                     placeholder="ID"
                 )
-                st.session_state.batch_items[idx]['id'] = new_id
+                st.session_state.batch_image_items[idx]['id'] = new_id
                 
                 new_count = st.number_input(
                     "Count", 
                     min_value=1, 
                     max_value=4, 
-                    value=item['number_of_images'], 
+                    value=item.get('number_of_images', 1), 
                     key=f"cnt_{ui_key}", 
                     label_visibility="collapsed"
                 )
-                st.session_state.batch_items[idx]['number_of_images'] = new_count
+                st.session_state.batch_image_items[idx]['number_of_images'] = new_count
 
             with col2:
                 # Remove button
-                # We use a button that adds to removal list.
-                # Since interacting with any button triggers rerun, this logic runs, 
-                # then we process removals, then rerun again to update UI.
                 if st.button("🗑️", key=f"del_{ui_key}", help="Remove this prompt"):
                     items_to_remove.append(idx)
             
@@ -443,13 +440,13 @@ if batch_items:
                 # Prompt Text
                 new_prompt = st.text_area(
                     "Prompt", 
-                    value=item['prompt'], 
+                    value=item.get('prompt', ''), 
                     key=f"prm_{ui_key}",
                     height=100,
                     label_visibility="collapsed",
                     placeholder="Enter prompt here..."
                 )
-                st.session_state.batch_items[idx]['prompt'] = new_prompt
+                st.session_state.batch_image_items[idx]['prompt'] = new_prompt
             
             st.divider()
 
@@ -457,7 +454,7 @@ if batch_items:
     if items_to_remove:
         # Remove in reverse order
         for idx in sorted(items_to_remove, reverse=True):
-            st.session_state.batch_items.pop(idx)
+            st.session_state.batch_image_items.pop(idx)
         st.rerun()
 
 
@@ -478,7 +475,7 @@ if batch_items:
     if reference_image:
         col1, col2 = st.columns([1, 2])
         with col1:
-            st.image(reference_image, caption="Reference Image", width='stretch')
+            st.image(reference_image, caption="Reference Image", use_container_width=True)
         with col2:
             st.info("💡 This reference image will be used for all image generations in the batch.")
 
@@ -526,7 +523,7 @@ if batch_items:
 # UI - Generate Button & Progress Tracking
 # ============================================================================
 
-if batch_items and st.button("🚀 Generate All Images", width='stretch', type="primary"):
+if batch_items and st.button("🚀 Generate All Images", use_container_width=True, type="primary"):
     # Create containers
     progress_container = st.container()
     debug_container = st.container() if debug_mode else None

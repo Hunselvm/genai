@@ -62,6 +62,11 @@ Upload a `.txt` file (one prompt per line) or `.csv` file (with per-prompt contr
 # Helper Functions
 # ============================================================================
 
+def get_unique_id():
+    """Generate a unique ID for UI widgets."""
+    return str(uuid.uuid4())
+
+
 def parse_txt_file(file_contents: str) -> List[Dict]:
     """Parse text file with multi-line prompts separated by blank lines.
     
@@ -100,7 +105,8 @@ def parse_txt_file(file_contents: str) -> List[Dict]:
             prompts.append({
                 'id': prompt_id if prompt_id else f"video_{idx}",
                 'prompt': prompt_text,
-                'number_of_videos': 1  # Default
+                'number_of_videos': 1,  # Default
+                '_ui_id': get_unique_id()
             })
     
     return prompts
@@ -118,7 +124,8 @@ def parse_csv_file(file_contents: str) -> List[Dict]:
         prompts.append({
             'id': row.get('id', f"video_{idx}"),
             'prompt': row['prompt'].strip(),
-            'number_of_videos': int(row.get('number_of_videos', 1))
+            'number_of_videos': int(row.get('number_of_videos', 1)),
+            '_ui_id': get_unique_id()
         })
 
     return prompts
@@ -316,11 +323,11 @@ class BatchVideoGenerator:
 # UI - Input Section
 # ============================================================================
 
-if 'batch_items' not in st.session_state:
-    st.session_state.batch_items = []
+if 'batch_aroll_items' not in st.session_state:
+    st.session_state.batch_aroll_items = []
 
-if 'last_file_ext' not in st.session_state:
-    st.session_state.last_file_ext = 'txt'
+if 'aroll_last_file_ext' not in st.session_state:
+    st.session_state.aroll_last_file_ext = 'txt'
 
 st.subheader("1. Add Prompts")
 
@@ -347,8 +354,8 @@ with input_tab1:
                 
                 is_valid, msg = validate_batch_items(new_items)
                 if is_valid:
-                    st.session_state.batch_items = new_items
-                    st.session_state.last_file_ext = ext
+                    st.session_state.batch_aroll_items = new_items
+                    st.session_state.aroll_last_file_ext = ext
                     st.success(f"✅ Loaded {len(new_items)} prompts!")
                     st.rerun()
                 else:
@@ -362,13 +369,13 @@ with input_tab2:
         height=200,
         placeholder="1 AROLL\n[VISUAL] Capybara...\n\n2 AROLL\n[VISUAL] Another scene..."
     )
-    if st.button("� Load from Text"):
+    if st.button("📥 Load from Text"):
         if manual_text.strip():
             new_items = parse_txt_file(manual_text)
             is_valid, msg = validate_batch_items(new_items)
             if is_valid:
-                st.session_state.batch_items = new_items
-                st.session_state.last_file_ext = 'txt'
+                st.session_state.batch_aroll_items = new_items
+                st.session_state.aroll_last_file_ext = 'txt'
                 st.success(f"✅ Loaded {len(new_items)} prompts!")
                 st.rerun()
             else:
@@ -380,8 +387,8 @@ with input_tab2:
 # UI - Edit & Preview Section
 # ============================================================================
 
-batch_items = st.session_state.batch_items
-file_ext = st.session_state.last_file_ext
+batch_items = st.session_state.batch_aroll_items
+file_ext = st.session_state.aroll_last_file_ext
 
 if batch_items:
     st.divider()
@@ -389,7 +396,7 @@ if batch_items:
     
     # Global clear
     if st.button("🗑️ Clear All"):
-        st.session_state.batch_items = []
+        st.session_state.batch_aroll_items = []
         st.rerun()
 
     # Editable list
@@ -406,22 +413,22 @@ if batch_items:
                 # ID and Count
                 new_id = st.text_input(
                     "ID", 
-                    value=item['id'], 
+                    value=item.get('id', f"video_{idx}"), 
                     key=f"id_{ui_key}",
                     label_visibility="collapsed",
                     placeholder="ID"
                 )
-                st.session_state.batch_items[idx]['id'] = new_id
+                st.session_state.batch_aroll_items[idx]['id'] = new_id
                 
                 new_count = st.number_input(
                     "Count", 
                     min_value=1, 
                     max_value=4, 
-                    value=item['number_of_videos'], 
+                    value=item.get('number_of_videos', 1), 
                     key=f"cnt_{ui_key}", 
                     label_visibility="collapsed"
                 )
-                st.session_state.batch_items[idx]['number_of_videos'] = new_count
+                st.session_state.batch_aroll_items[idx]['number_of_videos'] = new_count
 
             with col2:
                 # Remove button
@@ -432,13 +439,13 @@ if batch_items:
                 # Prompt Text
                 new_prompt = st.text_area(
                     "Prompt", 
-                    value=item['prompt'], 
+                    value=item.get('prompt', ''), 
                     key=f"prm_{ui_key}",
                     height=100,
                     label_visibility="collapsed",
                     placeholder="Enter prompt here..."
                 )
-                st.session_state.batch_items[idx]['prompt'] = new_prompt
+                st.session_state.batch_aroll_items[idx]['prompt'] = new_prompt
             
             st.divider()
 
@@ -446,7 +453,7 @@ if batch_items:
     if items_to_remove:
         # Remove in reverse order
         for idx in sorted(items_to_remove, reverse=True):
-            st.session_state.batch_items.pop(idx)
+            st.session_state.batch_aroll_items.pop(idx)
         st.rerun()
 
 
@@ -467,7 +474,7 @@ if batch_items:
     if reference_frame:
         col1, col2 = st.columns([1, 2])
         with col1:
-            st.image(reference_frame, caption="Reference Frame", width='stretch')
+            st.image(reference_frame, caption="Reference Frame", use_container_width=True)
         with col2:
             st.info("💡 This reference frame will be used as the starting point for all video generations in the batch.")
 
@@ -514,7 +521,7 @@ if batch_items and reference_frame:
 # UI - Generate Button & Progress Tracking
 # ============================================================================
 
-if batch_items and reference_frame and st.button("🚀 Generate All Videos", width='stretch', type="primary"):
+if batch_items and reference_frame and st.button("🚀 Generate All Videos", use_container_width=True, type="primary"):
     # Create containers
     progress_container = st.container()
     debug_container = st.container() if debug_mode else None
