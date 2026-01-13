@@ -163,7 +163,7 @@ def parse_txt_file_broll(file_contents: str) -> List[Dict]:
 
 
 def parse_csv_file_broll(file_contents: str) -> List[Dict]:
-    """Parse CSV file where id IS the image number."""
+    """Parse CSV file where id IS the image number (or use explicit image_number column)."""
     prompts = []
     reader = csv.DictReader(io.StringIO(file_contents))
 
@@ -171,14 +171,23 @@ def parse_csv_file_broll(file_contents: str) -> List[Dict]:
         if 'prompt' not in row or not row['prompt'].strip():
             continue  # Skip rows without prompt
 
-        # Extract image number from id (id should be numeric like "1", "2", "3")
         prompt_id = row.get('id', str(idx))
-        img_num = int(prompt_id) if prompt_id.isdigit() else idx
+
+        # Prioritize explicit image_number column (from failed prompts CSV)
+        if 'image_number' in row and row['image_number'].strip():
+            try:
+                img_num = int(row['image_number'])
+            except (ValueError, TypeError):
+                # Fall back to extracting from id
+                img_num = int(prompt_id) if prompt_id.isdigit() else idx
+        else:
+            # Extract image number from id (id should be numeric like "1", "2", "3")
+            img_num = int(prompt_id) if prompt_id.isdigit() else idx
 
         prompts.append({
             'id': prompt_id,
             'prompt': row['prompt'].strip(),
-            'image_number': img_num,  # Extracted from id
+            'image_number': img_num,  # From image_number column or extracted from id
             'number_of_videos': int(row.get('number_of_videos', 1)),
             '_ui_id': get_unique_id()
         })
