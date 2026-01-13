@@ -483,8 +483,7 @@ if batch_items and st.button("🚀 Generate All Images", width='stretch', type="
                                             st.image(img_url, caption=f"Image {idx + 1}", width='stretch')
                                             st.link_button(
                                                 f"⬇️ Download #{idx + 1}",
-                                                img_url,
-                                                key=f"dl_{prompt_id}_{idx}"
+                                                img_url
                                             )
 
                                 # Details
