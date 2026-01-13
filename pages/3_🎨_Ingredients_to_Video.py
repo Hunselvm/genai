@@ -164,6 +164,12 @@ if st.button("🎬 Generate Video from Ingredients", use_container_width=True):
                             if status == 'completed':
                                 if logger:
                                     logger.success(f"Video generation completed! (Total events: {event_count})")
+                                    logger.info(f"Result data keys: {list(event_data.keys())}")
+                                    if 'file_url' in event_data:
+                                        logger.info(f"Video URL: {event_data['file_url']}")
+                                    else:
+                                        logger.warning("No file_url in result! Full data:")
+                                        logger.info(str(event_data))
                                 result = event_data
                                 break
                             elif status == 'failed':
@@ -230,6 +236,31 @@ if st.button("🎬 Generate Video from Ingredients", use_container_width=True):
                                 "Video generation is taking longer than expected.\n"
                                 "Please check the History page in a few minutes to see your video."
                             )
+
+                    # If result doesn't have file_url, try fetching from history
+                    if result and not result.get('file_url'):
+                        if logger:
+                            logger.warning("Result missing file_url, fetching from history...")
+
+                        try:
+                            history = await client.get_histories(page=1, page_size=5)
+                            if history and history.get('data'):
+                                # Find the video we just created by ID or prompt
+                                video_id = result.get('id')
+                                for item in history['data']:
+                                    if video_id and item.get('id') == video_id:
+                                        if logger:
+                                            logger.success("Found video in history by ID!")
+                                        result = item
+                                        break
+                                    elif prompt.lower() in item.get('prompt', '').lower():
+                                        if logger:
+                                            logger.success("Found video in history by prompt!")
+                                        result = item
+                                        break
+                        except Exception as e:
+                            if logger:
+                                logger.error(f"Failed to fetch from history: {str(e)}")
 
                     await client.close()
                     return result
