@@ -2,6 +2,7 @@
 
 import streamlit as st
 import asyncio
+import httpx
 import csv
 import io
 import time
@@ -217,11 +218,29 @@ class BatchVideoGenerator:
                                     if self.logger:
                                         self.logger.error(f"Failed to fetch from history: {str(e)}")
 
+                            # Fetch video bytes for reliable downloading
+                            video_bytes_list = []
+                            file_urls = event_data.get('file_urls', [])
+                            if not file_urls and event_data.get('file_url'):
+                                file_urls = [event_data.get('file_url')]
+                            
+                            if file_urls:
+                                try:
+                                    async with httpx.AsyncClient() as client:
+                                        for url in file_urls:
+                                            resp = await client.get(url, timeout=60.0)
+                                            if resp.status_code == 200:
+                                                video_bytes_list.append(resp.content)
+                                except Exception as e:
+                                    if self.logger:
+                                        self.logger.error(f"Failed to download video bytes: {str(e)}")
+
                             self.results[prompt_id] = {
                                 'status': 'completed',
                                 'data': event_data,
                                 'prompt': prompt,
-                                'number_of_videos': number_of_videos
+                                'number_of_videos': number_of_videos,
+                                'video_bytes_list': video_bytes_list
                             }
                             return event_data
 
@@ -663,19 +682,41 @@ if batch_items and reference_frame and st.button("🚀 Generate All Videos", wid
                         if result_data['status'] == 'completed':
                             data = result_data['data']
 
-                            file_url = data.get('file_url')
-                            if file_url:
-                                # Clean prompt_id for filename (remove special chars)
-                                safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
-                                st.video(file_url)
-                                
-                                # Create download link with filename suggestion
-                                st.markdown(
-                                    f'<a href="{file_url}" download="{safe_id}.mp4" target="_blank">'
-                                    f'<button style="width:100%; padding:0.5rem; background-color:#0066cc; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Download {safe_id}.mp4</button>'
-                                    f'</a>',
-                                    unsafe_allow_html=True
-                                )
+                            file_urls = data.get('file_urls', [])
+                            if not file_urls and data.get('file_url'):
+                                file_urls = [data.get('file_url')]
+
+                            if file_urls:
+                                for idx, vid_url in enumerate(file_urls):
+                                    if not vid_url: continue
+                                    
+                                    # Clean prompt_id for filename
+                                    safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
+                                    suffix = f"_{idx+1}" if len(file_urls) > 1 else ""
+                                    
+                                    st.video(vid_url)
+                                    
+                                    # Download button
+                                    vid_bytes = None
+                                    if result_data.get('video_bytes_list') and len(result_data['video_bytes_list']) > idx:
+                                        vid_bytes = result_data['video_bytes_list'][idx]
+                                    
+                                    if vid_bytes:
+                                        st.download_button(
+                                            label=f"⬇️ Download {safe_id}{suffix}.mp4",
+                                            data=vid_bytes,
+                                            file_name=f"{safe_id}{suffix}.mp4",
+                                            mime="video/mp4",
+                                            key=f"dl_{safe_id}_{idx}",
+                                            use_container_width=True
+                                        )
+                                    else:
+                                        st.markdown(
+                                            f'<a href="{vid_url}" download="{safe_id}{suffix}.mp4" target="_blank">'
+                                            f'<button style="width:100%; padding:0.5rem; background-color:#6c757d; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Open Link (Rename Failed)</button>'
+                                            f'</a>',
+                                            unsafe_allow_html=True
+                                        )
 
                                 # Details
                                 with st.expander("ℹ️ Details"):

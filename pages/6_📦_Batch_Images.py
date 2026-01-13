@@ -2,6 +2,7 @@
 
 import streamlit as st
 import asyncio
+import httpx
 import csv
 import io
 import time
@@ -225,11 +226,29 @@ class BatchImageGenerator:
                                     if self.logger:
                                         self.logger.error(f"Failed to fetch from history: {str(e)}")
 
+                            # Fetch image bytes for reliable downloading/renaming
+                            image_bytes_list = []
+                            file_urls = event_data.get('file_urls', [])
+                            if not file_urls and event_data.get('file_url'):
+                                file_urls = [event_data.get('file_url')]
+                            
+                            if file_urls:
+                                try:
+                                    async with httpx.AsyncClient() as client:
+                                        for url in file_urls:
+                                            resp = await client.get(url, timeout=30.0)
+                                            if resp.status_code == 200:
+                                                image_bytes_list.append(resp.content)
+                                except Exception as dl_err:
+                                    if self.logger:
+                                        self.logger.error(f"Failed to download image bytes: {str(dl_err)}")
+
                             self.results[prompt_id] = {
                                 'status': 'completed',
                                 'data': event_data,
                                 'prompt': prompt,
-                                'number_of_images': number_of_images
+                                'number_of_images': number_of_images,
+                                'image_bytes_list': image_bytes_list
                             }
                             return event_data
 
@@ -694,13 +713,28 @@ if batch_items and st.button("🚀 Generate All Images", width='stretch', type="
                                             caption = f"{prompt_id} - Image {idx + 1}"
                                             st.image(img_url, caption=caption, width='stretch')
                                             
-                                            # Create download link with filename suggestion
-                                            st.markdown(
-                                                f'<a href="{img_url}" download="{safe_id}_{idx+1}.jpg" target="_blank">'
-                                                f'<button style="width:100%; padding:0.5rem; background-color:#0066cc; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Download {safe_id}_{idx+1}.jpg</button>'
-                                                f'</a>',
-                                                unsafe_allow_html=True
-                                            )
+                                            # Create download button (Server-side for correct naming)
+                                            img_bytes = None
+                                            if result_data.get('image_bytes_list') and len(result_data['image_bytes_list']) > idx:
+                                                img_bytes = result_data['image_bytes_list'][idx]
+                                            
+                                            if img_bytes:
+                                                st.download_button(
+                                                    label=f"⬇️ Download {safe_id}_{idx+1}.jpg",
+                                                    data=img_bytes,
+                                                    file_name=f"{safe_id}_{idx+1}.jpg",
+                                                    mime="image/jpeg",
+                                                    key=f"dl_{safe_id}_{idx}",
+                                                    use_container_width=True
+                                                )
+                                            else:
+                                                # Fallback to direct link if bytes missing
+                                                st.markdown(
+                                                    f'<a href="{img_url}" download="{safe_id}_{idx+1}.jpg" target="_blank">'
+                                                    f'<button style="width:100%; padding:0.5rem; background-color:#6c757d; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Open Link (Rename Failed)</button>'
+                                                    f'</a>',
+                                                    unsafe_allow_html=True
+                                                )
 
                                 # Details
                                 with st.expander("ℹ️ Details"):
