@@ -566,6 +566,8 @@ if batch_items and st.button("🚀 Generate All Images", use_container_width=Tru
         if 'reference_image' in locals() and reference_image:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                 tmp.write(reference_image.getvalue())
+                tmp.flush()  # Ensure data is written to disk
+                os.fsync(tmp.fileno())  # Force OS to write to disk
                 reference_image_path = tmp.name
 
         try:

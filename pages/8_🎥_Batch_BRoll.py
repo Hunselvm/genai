@@ -287,6 +287,8 @@ class BatchBRollVideoGenerator:
         try:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                 tmp.write(image_bytes_dict[image_number])
+                tmp.flush()  # Ensure data is written to disk
+                os.fsync(tmp.fileno())  # Force OS to write to disk
                 start_frame_path = tmp.name
 
             retry_count = 0

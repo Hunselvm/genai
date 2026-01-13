@@ -121,6 +121,8 @@ if st.button("🎬 Generate Video from Ingredients", width='stretch'):
                 for img in reference_images:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                         tmp.write(img.getvalue())
+                        tmp.flush()  # Ensure data is written to disk
+                        os.fsync(tmp.fileno())  # Force OS to write to disk
                         image_paths.append(tmp.name)
                         temp_files.append(tmp.name)
 

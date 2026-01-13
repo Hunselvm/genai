@@ -568,6 +568,8 @@ if batch_items and reference_frame and st.button("🚀 Generate All Videos", use
         start_frame_path = None
         with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
             tmp.write(reference_frame.getvalue())
+            tmp.flush()  # Ensure data is written to disk
+            os.fsync(tmp.fileno())  # Force OS to write to disk
             start_frame_path = tmp.name
 
         try:

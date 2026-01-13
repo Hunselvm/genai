@@ -144,6 +144,8 @@ if st.button("🎬 Generate Video from Frames", width='stretch'):
                 # Save start frame to temp file
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_start:
                     tmp_start.write(start_frame.getvalue())
+                    tmp_start.flush()  # Ensure data is written to disk
+                    os.fsync(tmp_start.fileno())  # Force OS to write to disk
                     start_frame_path = tmp_start.name
 
                 # Save end frame if provided
@@ -151,6 +153,8 @@ if st.button("🎬 Generate Video from Frames", width='stretch'):
                 if end_frame:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_end:
                         tmp_end.write(end_frame.getvalue())
+                        tmp_end.flush()  # Ensure data is written to disk
+                        os.fsync(tmp_end.fileno())  # Force OS to write to disk
                         end_frame_path = tmp_end.name
 
                 if logger:
