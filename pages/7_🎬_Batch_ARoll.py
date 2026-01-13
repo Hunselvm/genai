@@ -9,6 +9,7 @@ import time
 import tempfile
 import os
 import uuid
+import zipfile
 from typing import List, Dict, Tuple, Optional
 
 from utils.veo_client import VEOClient
@@ -336,6 +337,9 @@ if 'batch_aroll_items' not in st.session_state:
 if 'aroll_last_file_ext' not in st.session_state:
     st.session_state.aroll_last_file_ext = 'txt'
 
+if 'aroll_results' not in st.session_state:
+    st.session_state.aroll_results = None
+
 st.subheader("1. Add Prompts")
 
 input_tab1, input_tab2 = st.tabs(["📁 Upload File", "✍️ Manual Input"])
@@ -631,127 +635,167 @@ if batch_items and reference_frame and st.button("🚀 Generate All Videos", use
 
                 return await generation_task
 
+
             results = asyncio.run(run_with_updates())
+            st.session_state.aroll_results = results
 
             elapsed_total = time.time() - start_time
             st.success(f"✅ Batch generation completed in {elapsed_total:.1f}s!")
 
-            # ============================================================================
-            # UI - Results Display
-            # ============================================================================
+# ============================================================================
+# UI - Results Display (Persistent)
+# ============================================================================
 
-            if results:
-                st.divider()
-                st.subheader("🎥 Generated Videos")
+if st.session_state.aroll_results:
+    results = st.session_state.aroll_results
+    st.divider()
+    st.subheader("🎥 Generated Videos")
 
-                # Summary
-                completed_results = [r for r in results.values() if r['status'] == 'completed']
-                total_videos = sum(
-                    r['number_of_videos']
-                    for r in completed_results
-                )
-                completed_count = len(completed_results)
-                failed_count = sum(1 for r in results.values() if r['status'] == 'failed')
+    # Summary
+    completed_results = [r for r in results.values() if r['status'] == 'completed']
+    total_videos = sum(
+        r['number_of_videos']
+        for r in completed_results
+    )
+    completed_count = len(completed_results)
+    failed_count = sum(1 for r in results.values() if r['status'] == 'failed')
 
-                col1, col2, col3 = st.columns(3)
-                col1.metric("✅ Successful", completed_count)
-                col2.metric("🎬 Total Videos", total_videos)
-                col3.metric("❌ Failed", failed_count)
+    col1, col2, col3 = st.columns(3)
+    col1.metric("✅ Successful", completed_count)
+    col2.metric("🎬 Total Videos", total_videos)
+    col3.metric("❌ Failed", failed_count)
 
-                # Failed prompts CSV download
-                if failed_count > 0:
-                    st.divider()
-                    failed_results = {pid: r for pid, r in results.items() if r['status'] == 'failed'}
+    # -------------------------------------------------------------------------
+    # Bulk Download (ZIP)
+    # -------------------------------------------------------------------------
+    if completed_count > 0:
+        st.divider()
+        st.subheader("📦 Bulk Download")
+        
+        # Prepare ZIP file
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for prompt_id, result_data in results.items():
+                if result_data['status'] == 'completed':
+                    video_bytes_list = result_data.get('video_bytes_list', [])
                     
-                    # Create CSV for failed prompts
-                    csv_buffer = io.StringIO()
-                    csv_writer = csv.writer(csv_buffer)
-                    csv_writer.writerow(['id', 'prompt', 'number_of_videos'])
+                    # Also include file_urls if bytes failed (less likely but good fallback?)
+                    # For ZIP we really need bytes.
                     
-                    for prompt_id, result_data in failed_results.items():
-                        csv_writer.writerow([
-                            prompt_id,
-                            result_data['prompt'],
-                            result_data.get('number_of_videos', 1)
-                        ])
-                    
-                    csv_data = csv_buffer.getvalue()
-                    
-                    st.download_button(
-                        label=f"📥 Download Failed Prompts CSV ({failed_count} items)",
-                        data=csv_data,
-                        file_name="failed_prompts_aroll.csv",
-                        mime="text/csv",
-                        help="Download a CSV of failed prompts to retry later"
-                    )
-                    st.caption("💡 Use this CSV to retry only the failed prompts")
+                    for idx, vid_bytes in enumerate(video_bytes_list):
+                        # Clean prompt_id for filename
+                        safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
+                        suffix = f"_{idx+1}" if len(video_bytes_list) > 1 else ""
+                        filename = f"{safe_id}{suffix}.mp4"
+                        
+                        zip_file.writestr(filename, vid_bytes)
+        
+        st.download_button(
+            label=f"📥 Download All {total_videos} Videos (ZIP)",
+            data=zip_buffer.getvalue(),
+            file_name=f"batch_aroll_{int(time.time())}.zip",
+            mime="application/zip",
+            type="primary",
+            use_container_width=True
+        )
 
-                st.divider()
+    # -------------------------------------------------------------------------
+    # Failed Prompts CSV
+    # -------------------------------------------------------------------------
+    if failed_count > 0:
+        st.divider()
+        failed_results = {pid: r for pid, r in results.items() if r['status'] == 'failed'}
+        
+        # Create CSV for failed prompts
+        csv_buffer = io.StringIO()
+        csv_writer = csv.writer(csv_buffer)
+        csv_writer.writerow(['id', 'prompt', 'number_of_videos'])
+        
+        for prompt_id, result_data in failed_results.items():
+            csv_writer.writerow([
+                prompt_id,
+                result_data['prompt'],
+                result_data.get('number_of_videos', 1)
+            ])
+        
+        csv_data = csv_buffer.getvalue()
+        
+        st.download_button(
+            label=f"📥 Download Failed Prompts CSV ({failed_count} items)",
+            data=csv_data,
+            file_name="failed_prompts_aroll.csv",
+            mime="text/csv",
+            help="Download a CSV of failed prompts to retry later",
+            use_container_width=True
+        )
+        st.caption("💡 Use this CSV to retry only the failed prompts")
 
-                # Display each result
-                for prompt_id, result_data in results.items():
-                    with st.expander(f"🎬 {prompt_id}: {result_data['prompt'][:100]}...", expanded=True):
-                        if result_data['status'] == 'completed':
-                            data = result_data['data']
+    st.divider()
 
-                            file_urls = data.get('file_urls', [])
-                            if not file_urls and data.get('file_url'):
-                                file_urls = [data.get('file_url')]
+    # Display each result
+    for prompt_id, result_data in results.items():
+        with st.expander(f"🎬 {prompt_id}: {result_data['prompt'][:100]}...", expanded=True):
+            if result_data['status'] == 'completed':
+                data = result_data['data']
 
-                            if file_urls:
-                                for idx, vid_url in enumerate(file_urls):
-                                    if not vid_url: continue
-                                    
-                                    # Clean prompt_id for filename
-                                    safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
-                                    suffix = f"_{idx+1}" if len(file_urls) > 1 else ""
-                                    
-                                    st.video(vid_url)
-                                    
-                                    # Download button
-                                    vid_bytes = None
-                                    if result_data.get('video_bytes_list') and len(result_data['video_bytes_list']) > idx:
-                                        vid_bytes = result_data['video_bytes_list'][idx]
-                                    
-                                    if vid_bytes:
-                                        st.download_button(
-                                            label=f"⬇️ Download {safe_id}{suffix}.mp4",
-                                            data=vid_bytes,
-                                            file_name=f"{safe_id}{suffix}.mp4",
-                                            mime="video/mp4",
-                                            key=f"dl_{safe_id}_{idx}",
-                                            use_container_width=True
-                                        )
-                                    else:
-                                        st.markdown(
-                                            f'<a href="{vid_url}" download="{safe_id}{suffix}.mp4" target="_blank">'
-                                            f'<button style="width:100%; padding:0.5rem; background-color:#6c757d; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Open Link (Rename Failed)</button>'
-                                            f'</a>',
-                                            unsafe_allow_html=True
-                                        )
+                file_urls = data.get('file_urls', [])
+                if not file_urls and data.get('file_url'):
+                    file_urls = [data.get('file_url')]
 
-                                # Details
-                                with st.expander("ℹ️ Details"):
-                                    st.json({
-                                        "id": data.get('id'),
-                                        "prompt": result_data['prompt'],
-                                        "number_of_videos": result_data['number_of_videos'],
-                                        "file_urls": file_urls,
-                                        "created_at": data.get('created_at')
-                                    })
-                            else:
-                                st.warning("⚠️ Video URL not available. Check the History page.")
+                if file_urls:
+                    for idx, vid_url in enumerate(file_urls):
+                        if not vid_url: continue
+                        
+                        # Clean prompt_id for filename
+                        safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
+                        suffix = f"_{idx+1}" if len(file_urls) > 1 else ""
+                        
+                        st.video(vid_url)
+                        
+                        # Download button
+                        vid_bytes = None
+                        if result_data.get('video_bytes_list') and len(result_data['video_bytes_list']) > idx:
+                            vid_bytes = result_data['video_bytes_list'][idx]
+                        
+                        if vid_bytes:
+                            st.download_button(
+                                label=f"⬇️ Download {safe_id}{suffix}.mp4",
+                                data=vid_bytes,
+                                file_name=f"{safe_id}{suffix}.mp4",
+                                mime="video/mp4",
+                                key=f"dl_{safe_id}_{idx}",
+                                use_container_width=True
+                            )
+                        else:
+                            st.markdown(
+                                f'<a href="{vid_url}" download="{safe_id}{suffix}.mp4" target="_blank">'
+                                f'<button style="width:100%; padding:0.5rem; background-color:#6c757d; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Open Link (Rename Failed)</button>'
+                                f'</a>',
+                                unsafe_allow_html=True
+                            )
 
-                        elif result_data['status'] == 'failed':
-                            st.error(f"❌ Generation failed: {result_data['error']}")
+                    # Details
+                    with st.expander("ℹ️ Details"):
+                        st.json({
+                            "id": data.get('id'),
+                            "prompt": result_data['prompt'],
+                            "number_of_videos": result_data['number_of_videos'],
+                            "file_urls": file_urls,
+                            "created_at": data.get('created_at')
+                        })
+                else:
+                    st.warning("⚠️ Video URL not available. Check the History page.")
 
-            # Update quota
-            if st.session_state.quota_info:
-                try:
-                    quota = asyncio.run(client.get_quota())
-                    st.session_state.quota_info = quota
-                except:
-                    pass
+            elif result_data['status'] == 'failed':
+                st.error(f"❌ Generation failed: {result_data['error']}")
+
+# Update quota
+if st.session_state.quota_info and 'client' in locals():
+    try:
+        quota = asyncio.run(client.get_quota())
+        st.session_state.quota_info = quota
+    except:
+        pass
 
         except AuthenticationError as e:
             st.error(f"🔐 Authentication Error: {str(e)}")

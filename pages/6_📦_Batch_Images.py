@@ -9,6 +9,7 @@ import time
 import tempfile
 import os
 import uuid
+import zipfile
 from typing import List, Dict, Tuple, Optional
 
 from utils.veo_client import VEOClient
@@ -330,6 +331,9 @@ if 'batch_image_items' not in st.session_state:
 if 'image_last_file_ext' not in st.session_state:
     st.session_state.image_last_file_ext = 'txt'
 
+if 'image_results' not in st.session_state:
+    st.session_state.image_results = None
+
 st.subheader("1. Add Prompts")
 
 input_tab1, input_tab2 = st.tabs(["📁 Upload File", "✍️ Manual Input"])
@@ -624,129 +628,16 @@ if batch_items and st.button("🚀 Generate All Images", use_container_width=Tru
                     update_progress_display()
                     await asyncio.sleep(0.5)  # Update every 500ms
 
-                # Final update
                 update_progress_display()
 
                 return await generation_task
 
+
             results = asyncio.run(run_with_updates())
+            st.session_state.image_results = results
 
             elapsed_total = time.time() - start_time
             st.success(f"✅ Batch generation completed in {elapsed_total:.1f}s!")
-
-            # ============================================================================
-            # UI - Results Display
-            # ============================================================================
-
-            if results:
-                st.divider()
-                st.subheader("🎨 Generated Images")
-
-                # Summary
-                completed_results = [r for r in results.values() if r['status'] == 'completed']
-                total_images = sum(
-                    len(r['data'].get('file_urls', [])) if isinstance(r['data'].get('file_urls'), list)
-                    else (1 if r['data'].get('file_url') else 0)
-                    for r in completed_results
-                )
-                completed_count = len(completed_results)
-                failed_count = sum(1 for r in results.values() if r['status'] == 'failed')
-
-                col1, col2, col3 = st.columns(3)
-                col1.metric("✅ Successful", completed_count)
-                col2.metric("📷 Total Images", total_images)
-                col3.metric("❌ Failed", failed_count)
-
-                # Failed prompts CSV download
-                if failed_count > 0:
-                    st.divider()
-                    failed_results = {pid: r for pid, r in results.items() if r['status'] == 'failed'}
-                    
-                    # Create CSV for failed prompts
-                    csv_buffer = io.StringIO()
-                    csv_writer = csv.writer(csv_buffer)
-                    csv_writer.writerow(['id', 'prompt', 'number_of_images'])
-                    
-                    for prompt_id, result_data in failed_results.items():
-                        csv_writer.writerow([
-                            prompt_id,
-                            result_data['prompt'],
-                            result_data.get('number_of_images', 1)
-                        ])
-                    
-                    csv_data = csv_buffer.getvalue()
-                    
-                    st.download_button(
-                        label=f"📥 Download Failed Prompts CSV ({failed_count} items)",
-                        data=csv_data,
-                        file_name="failed_prompts.csv",
-                        mime="text/csv",
-                        help="Download a CSV of failed prompts to retry later"
-                    )
-                    st.caption("💡 Use this CSV to retry only the failed prompts")
-
-                st.divider()
-
-                # Display each result
-                for prompt_id, result_data in results.items():
-                    with st.expander(f"📸 {prompt_id}: {result_data['prompt'][:100]}...", expanded=True):
-                        if result_data['status'] == 'completed':
-                            data = result_data['data']
-
-                            # Handle both file_urls (array) and file_url (single)
-                            file_urls = data.get('file_urls')
-                            if not file_urls:
-                                file_url = data.get('file_url')
-                                file_urls = [file_url] if file_url else []
-
-                            if file_urls and any(file_urls):
-                                # Display images in grid
-                                cols = st.columns(min(len(file_urls), 3))
-                                for idx, img_url in enumerate(file_urls):
-                                    if img_url:  # Skip None values
-                                        with cols[idx % 3]:
-                                            # Clean prompt_id for filename (remove special chars)
-                                            safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
-                                            caption = f"{prompt_id} - Image {idx + 1}"
-                                            st.image(img_url, caption=caption, width='stretch')
-                                            
-                                            # Create download button (Server-side for correct naming)
-                                            img_bytes = None
-                                            if result_data.get('image_bytes_list') and len(result_data['image_bytes_list']) > idx:
-                                                img_bytes = result_data['image_bytes_list'][idx]
-                                            
-                                            if img_bytes:
-                                                st.download_button(
-                                                    label=f"⬇️ Download {safe_id}_{idx+1}.jpg",
-                                                    data=img_bytes,
-                                                    file_name=f"{safe_id}_{idx+1}.jpg",
-                                                    mime="image/jpeg",
-                                                    key=f"dl_{safe_id}_{idx}",
-                                                    use_container_width=True
-                                                )
-                                            else:
-                                                # Fallback to direct link if bytes missing
-                                                st.markdown(
-                                                    f'<a href="{img_url}" download="{safe_id}_{idx+1}.jpg" target="_blank">'
-                                                    f'<button style="width:100%; padding:0.5rem; background-color:#6c757d; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Open Link (Rename Failed)</button>'
-                                                    f'</a>',
-                                                    unsafe_allow_html=True
-                                                )
-
-                                # Details
-                                with st.expander("ℹ️ Details"):
-                                    st.json({
-                                        "id": data.get('id'),
-                                        "prompt": result_data['prompt'],
-                                        "number_of_images": result_data['number_of_images'],
-                                        "file_urls": file_urls,
-                                        "created_at": data.get('created_at')
-                                    })
-                            else:
-                                st.warning("⚠️ No image URLs available. Check the History page.")
-
-                        elif result_data['status'] == 'failed':
-                            st.error(f"❌ Generation failed: {result_data['error']}")
 
             # Update quota
             if st.session_state.quota_info:
