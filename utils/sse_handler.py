@@ -93,6 +93,14 @@ async def parse_sse_stream(response: httpx.Response, logger=None) -> AsyncGenera
 
                     # Handle dictionary responses (normal progress updates)
                     elif isinstance(event_data, dict):
+                        # Check if this is a completion event (video_generation_complete or image_generation_complete)
+                        if current_event_type and 'complete' in current_event_type:
+                            # Inject status and percentage if missing
+                            if 'status' not in event_data:
+                                event_data['status'] = 'completed'
+                            if 'process_percentage' not in event_data:
+                                event_data['process_percentage'] = 100
+
                         if logger:
                             status = event_data.get('status', 'unknown')
                             progress = event_data.get('process_percentage', 0)
