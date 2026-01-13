@@ -283,13 +283,13 @@ class VEOClient:
             start_frame_data = f.read()
 
         files = {
-            'start_frame': ('start_frame.jpg', start_frame_data, 'image/jpeg')
+            'image': ('image.jpg', start_frame_data, 'image/jpeg')
         }
 
         if end_frame_path:
             with open(end_frame_path, 'rb') as f:
                 end_frame_data = f.read()
-            files['end_frame'] = ('end_frame.jpg', end_frame_data, 'image/jpeg')
+            files['end_image'] = ('end_image.jpg', end_frame_data, 'image/jpeg')
 
         data = {'prompt': prompt}
 
