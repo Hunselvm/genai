@@ -683,6 +683,148 @@ if batch_items and st.button("🚀 Generate All Images", use_container_width=Tru
 
 
 # ============================================================================
+# UI - Results Display (Persistent)
+# ============================================================================
+
+if st.session_state.image_results:
+    results = st.session_state.image_results
+    st.divider()
+    st.subheader("🖼️ Generated Images")
+
+    # Summary
+    completed_results = [r for r in results.values() if r['status'] == 'completed']
+    total_images = sum(
+        r['number_of_images']
+        for r in completed_results
+    )
+    completed_count = len(completed_results)
+    failed_count = sum(1 for r in results.values() if r['status'] == 'failed')
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("✅ Successful", completed_count)
+    col2.metric("🖼️ Total Images", total_images)
+    col3.metric("❌ Failed", failed_count)
+
+    # -------------------------------------------------------------------------
+    # Bulk Download (ZIP)
+    # -------------------------------------------------------------------------
+    if completed_count > 0:
+        st.divider()
+        st.subheader("📦 Bulk Download")
+
+        # Prepare ZIP file
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for prompt_id, result_data in results.items():
+                if result_data['status'] == 'completed':
+                    image_bytes_list = result_data.get('image_bytes_list', [])
+
+                    for idx, img_bytes in enumerate(image_bytes_list):
+                        # Clean prompt_id for filename
+                        safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
+                        suffix = f"_{idx+1}" if len(image_bytes_list) > 1 else ""
+                        filename = f"{safe_id}{suffix}.png"
+
+                        zip_file.writestr(filename, img_bytes)
+
+        st.download_button(
+            label=f"📥 Download All {total_images} Images (ZIP)",
+            data=zip_buffer.getvalue(),
+            file_name=f"batch_images_{int(time.time())}.zip",
+            mime="application/zip",
+            type="primary",
+            use_container_width=True
+        )
+
+    # -------------------------------------------------------------------------
+    # Failed Prompts CSV
+    # -------------------------------------------------------------------------
+    if failed_count > 0:
+        st.divider()
+        failed_results = {pid: r for pid, r in results.items() if r['status'] == 'failed'}
+
+        # Create CSV for failed prompts
+        csv_buffer = io.StringIO()
+        csv_writer = csv.writer(csv_buffer)
+        csv_writer.writerow(['id', 'prompt', 'number_of_images'])
+
+        for prompt_id, result_data in failed_results.items():
+            csv_writer.writerow([
+                prompt_id,
+                result_data['prompt'],
+                result_data.get('number_of_images', 1)
+            ])
+
+        csv_data = csv_buffer.getvalue()
+
+        st.download_button(
+            label=f"📥 Download Failed Prompts CSV ({failed_count} items)",
+            data=csv_data,
+            file_name="failed_prompts_images.csv",
+            mime="text/csv",
+            help="Download a CSV of failed prompts to retry later",
+            use_container_width=True
+        )
+        st.caption("💡 Use this CSV to retry only the failed prompts")
+
+    st.divider()
+
+    # Display each result
+    for prompt_id, result_data in results.items():
+        with st.expander(f"🖼️ {prompt_id}: {result_data['prompt'][:100]}...", expanded=True):
+            if result_data['status'] == 'completed':
+                data = result_data['data']
+
+                file_urls = data.get('file_urls', [])
+                if not file_urls and data.get('file_url'):
+                    file_urls = [data.get('file_url')]
+
+                if file_urls:
+                    # Display images in grid
+                    cols = st.columns(min(3, len(file_urls)))
+                    for idx, img_url in enumerate(file_urls):
+                        if not img_url: continue
+
+                        col_idx = idx % len(cols)
+                        with cols[col_idx]:
+                            # Clean prompt_id for filename
+                            safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
+                            suffix = f"_{idx+1}" if len(file_urls) > 1 else ""
+
+                            st.image(img_url, use_container_width=True)
+
+                            # Download button
+                            img_bytes = None
+                            if result_data.get('image_bytes_list') and len(result_data['image_bytes_list']) > idx:
+                                img_bytes = result_data['image_bytes_list'][idx]
+
+                            if img_bytes:
+                                st.download_button(
+                                    label=f"⬇️ Download",
+                                    data=img_bytes,
+                                    file_name=f"{safe_id}{suffix}.png",
+                                    mime="image/png",
+                                    key=f"dl_{safe_id}_{idx}",
+                                    use_container_width=True
+                                )
+
+                    # Details
+                    with st.expander("ℹ️ Details"):
+                        st.json({
+                            "id": data.get('id'),
+                            "prompt": result_data['prompt'],
+                            "number_of_images": result_data['number_of_images'],
+                            "file_urls": file_urls,
+                            "created_at": data.get('created_at')
+                        })
+                else:
+                    st.warning("⚠️ Image URLs not available. Check the History page.")
+
+            elif result_data['status'] == 'failed':
+                st.error(f"❌ Generation failed: {result_data['error']}")
+
+
+# ============================================================================
 # UI - Tips Section
 # ============================================================================
 
