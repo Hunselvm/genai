@@ -61,17 +61,46 @@ Upload a `.txt` file (one prompt per line) or `.csv` file (with per-prompt contr
 # ============================================================================
 
 def parse_txt_file(file_contents: str) -> List[Dict]:
-    """Parse text file with one prompt per line."""
-    lines = file_contents.strip().split('\n')
+    """Parse text file with multi-line prompts separated by blank lines.
+    
+    Format:
+    ID_LINE
+    prompt line 1
+    prompt line 2
+    
+    NEXT_ID
+    next prompt...
+    """
+    # Split by double newlines to get prompt blocks
+    blocks = file_contents.strip().split('\n\n')
     prompts = []
-    for idx, line in enumerate(lines, 1):
-        line = line.strip()
-        if line:  # Skip empty lines
+    
+    for idx, block in enumerate(blocks, 1):
+        block = block.strip()
+        if not block:
+            continue
+        
+        lines = block.split('\n')
+        if len(lines) == 0:
+            continue
+        
+        # First line is the ID, rest is the prompt
+        if len(lines) == 1:
+            # Single line: use as both ID and prompt
+            prompt_id = lines[0].strip()
+            prompt_text = lines[0].strip()
+        else:
+            # Multi-line: first line is ID, rest is prompt
+            prompt_id = lines[0].strip()
+            prompt_text = '\n'.join(lines[1:]).strip()
+        
+        if prompt_text:  # Only add if we have prompt content
             prompts.append({
-                'id': f"prompt_{idx}",
-                'prompt': line,
+                'id': prompt_id if prompt_id else f"prompt_{idx}",
+                'prompt': prompt_text,
                 'number_of_images': 1  # Default
             })
+    
     return prompts
 
 
