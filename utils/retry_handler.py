@@ -44,6 +44,11 @@ RETRY_STRATEGIES = {
         base_delay=2.0,
         backoff_factor=2.0  # Exponential: 2s → 4s → 8s
     ),
+    'connection_error': RetryConfig(
+        max_retries=4,
+        base_delay=3.0,
+        backoff_factor=2.0  # Exponential: 3s → 6s → 12s → 24s
+    ),
     'default': RetryConfig(
         max_retries=2,
         base_delay=1.0,
@@ -64,17 +69,32 @@ class RetryHandler:
             error: The exception to classify
 
         Returns:
-            Strategy name ('recaptcha', 'server_error', or 'default')
+            Strategy name ('recaptcha', 'server_error', 'connection_error', or 'default')
         """
-        error_str = str(error)
+        error_str = str(error).lower()
 
         # Check for reCAPTCHA errors (403 with recaptcha keyword)
-        if '403' in error_str and 'recaptcha' in error_str.lower():
+        if '403' in error_str and 'recaptcha' in error_str:
             return 'recaptcha'
 
         # Check for server errors (500+)
         elif '500' in error_str:
             return 'server_error'
+
+        # Check for connection/network errors
+        elif any(keyword in error_str for keyword in [
+            'connection failed',
+            'connection error',
+            'timeout',
+            'timed out',
+            'network error',
+            'connection reset',
+            'connection refused',
+            'remotedisconnected',
+            'connection aborted',
+            'broken pipe'
+        ]):
+            return 'connection_error'
 
         # Default strategy for other errors
         else:
@@ -102,11 +122,11 @@ class RetryHandler:
         Raises:
             The last exception if all retries are exhausted
         """
-        config = RETRY_STRATEGIES.get(error_type, RETRY_STRATEGIES['default'])
         retry_count = 0
         last_error = None
+        current_config = RETRY_STRATEGIES.get(error_type, RETRY_STRATEGIES['default'])
 
-        while retry_count <= config.max_retries:
+        while True:
             try:
                 # Attempt execution
                 return await func()
@@ -114,20 +134,19 @@ class RetryHandler:
             except Exception as e:
                 last_error = e
 
-                # Classify the error to potentially adjust strategy
+                # Classify the error to select appropriate strategy
                 detected_type = RetryHandler.classify_error(e)
+                current_config = RETRY_STRATEGIES.get(detected_type, RETRY_STRATEGIES['default'])
 
-                # Don't retry non-retryable errors
-                if detected_type == 'default' and retry_count >= config.max_retries:
+                # Check if we've exhausted retries
+                if retry_count >= current_config.max_retries:
                     break
 
                 # Increment retry count
                 retry_count += 1
-                if retry_count > config.max_retries:
-                    break
 
                 # Calculate delay for this retry
-                delay = config.calculate_delay(retry_count)
+                delay = current_config.calculate_delay(retry_count)
 
                 # Notify callback for progress tracking
                 if on_retry:
@@ -136,7 +155,7 @@ class RetryHandler:
                 # Log retry attempt
                 if logger:
                     logger.warning(
-                        f"Retry {retry_count}/{config.max_retries} "
+                        f"Retry {retry_count}/{current_config.max_retries} "
                         f"after {delay:.1f}s for {detected_type}: {str(e)[:100]}"
                     )
 
