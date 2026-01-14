@@ -4,6 +4,8 @@ import streamlit as st
 import asyncio
 from utils.veo_client import VEOClient
 from utils.exceptions import VEOAPIError
+from utils.quota_display import display_quota
+from utils.sidebar import render_sidebar
 from datetime import datetime
 
 st.set_page_config(page_title="History", page_icon="📜", layout="wide")
@@ -19,8 +21,6 @@ if not st.session_state.get('api_key'):
     st.stop()
 
 # Display quota
-from utils.quota_display import display_quota
-from utils.sidebar import render_sidebar
 display_quota()
 
 st.markdown("View all your past video generations.")
