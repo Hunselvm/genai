@@ -19,7 +19,7 @@ from utils.logger import StreamlitLogger
 from utils.quota_display import display_quota
 from utils.sidebar import render_sidebar
 
-st.set_page_config(page_title="Batch A-Roll", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="A-ROLL Footage", page_icon="🎬", layout="wide")
 
 # Custom CSS
 st.markdown("""
@@ -44,7 +44,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🎬 Batch A-Roll Generator")
+st.title("🎬 A-ROLL Footage Generator")
 
 # Render Sidebar
 render_sidebar()

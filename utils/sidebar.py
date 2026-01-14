@@ -7,7 +7,6 @@ from utils.veo_client import VEOClient
 def render_sidebar():
     """Render the standard sidebar with API key config and tools."""
     with st.sidebar:
-        st.image("https://via.placeholder.com/150x50/667eea/ffffff?text=VEO+API", use_container_width=True)
         st.title("⚙️ Configuration")
 
         # Initialize session state for API key if not exists

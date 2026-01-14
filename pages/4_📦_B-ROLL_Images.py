@@ -19,7 +19,7 @@ from utils.logger import StreamlitLogger
 from utils.quota_display import display_quota
 from utils.sidebar import render_sidebar
 
-st.set_page_config(page_title="Batch Images", page_icon="📦", layout="wide")
+st.set_page_config(page_title="B-ROLL Images", page_icon="📦", layout="wide")
 
 # Custom CSS
 st.markdown("""
@@ -44,7 +44,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📦 Batch Image Generation")
+st.title("📦 B-ROLL Images Generation")
 
 # Render Sidebar
 render_sidebar()
