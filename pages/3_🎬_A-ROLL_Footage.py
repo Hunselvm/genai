@@ -153,8 +153,8 @@ def validate_batch_items(items: List[Dict]) -> Tuple[bool, str]:
     if not items:
         return False, "No valid prompts found in file"
 
-    if len(items) > 20:
-        return False, "Too many prompts (max 20 per batch for videos)"
+    if len(items) > 50:
+        return False, "Too many prompts (max 50 per batch for videos)"
 
     for item in items:
         if not item.get('prompt') or not item['prompt'].strip():
@@ -304,19 +304,31 @@ class BatchVideoGenerator:
         aspect_ratio: str,
         start_frame_path: str
     ) -> Dict[str, Dict]:
-        """Generate videos for all prompts in parallel."""
-        tasks = [
-            self.generate_single(
-                prompt_id=item['id'],
-                prompt=item['prompt'],
-                aspect_ratio=aspect_ratio,
-                number_of_videos=item['number_of_videos'],
-                start_frame_path=start_frame_path
-            )
-            for item in batch_items
-        ]
+        """Generate videos for all prompts with staggered start times."""
+        tasks = []
 
-        # Run all tasks concurrently
+        # Start tasks with staggered delays to avoid overwhelming the API
+        for idx, item in enumerate(batch_items):
+            # Add a small delay between starting each task (0.5 seconds)
+            # This spreads out the initial API requests
+            if idx > 0:
+                await asyncio.sleep(0.5)
+
+            task = asyncio.create_task(
+                self.generate_single(
+                    prompt_id=item['id'],
+                    prompt=item['prompt'],
+                    aspect_ratio=aspect_ratio,
+                    number_of_videos=item['number_of_videos'],
+                    start_frame_path=start_frame_path
+                )
+            )
+            tasks.append(task)
+
+            if self.logger:
+                self.logger.info(f"Started generation {idx + 1}/{len(batch_items)}: {item['id']}")
+
+        # Wait for all tasks to complete
         await asyncio.gather(*tasks, return_exceptions=True)
 
         return self.results

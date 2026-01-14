@@ -298,19 +298,31 @@ class BatchImageGenerator:
         aspect_ratio: str,
         reference_image_path: Optional[str] = None
     ) -> Dict[str, Dict]:
-        """Generate images for all prompts in parallel."""
-        tasks = [
-            self.generate_single(
-                prompt_id=item['id'],
-                prompt=item['prompt'],
-                aspect_ratio=aspect_ratio,
-                number_of_images=item['number_of_images'],
-                reference_image_path=reference_image_path
-            )
-            for item in batch_items
-        ]
+        """Generate images for all prompts with staggered start times."""
+        tasks = []
 
-        # Run all tasks concurrently
+        # Start tasks with staggered delays to avoid overwhelming the API
+        for idx, item in enumerate(batch_items):
+            # Add a small delay between starting each task (0.5 seconds)
+            # This spreads out the initial API requests
+            if idx > 0:
+                await asyncio.sleep(0.5)
+
+            task = asyncio.create_task(
+                self.generate_single(
+                    prompt_id=item['id'],
+                    prompt=item['prompt'],
+                    aspect_ratio=aspect_ratio,
+                    number_of_images=item['number_of_images'],
+                    reference_image_path=reference_image_path
+                )
+            )
+            tasks.append(task)
+
+            if self.logger:
+                self.logger.info(f"Started generation {idx + 1}/{len(batch_items)}: {item['id']}")
+
+        # Wait for all tasks to complete
         await asyncio.gather(*tasks, return_exceptions=True)
 
         return self.results
