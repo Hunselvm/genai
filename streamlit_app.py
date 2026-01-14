@@ -12,39 +12,8 @@ st.set_page_config(
 )
 
 # Password Protection
-def check_password():
-    """Returns `True` if the user had the correct password."""
-
-    def password_entered():
-        """Checks whether a password entered by the user is correct."""
-        if st.session_state["password"] == st.secrets.get("app_password", "changeme123"):
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
-    # First run, show input for password
-    if "password_correct" not in st.session_state:
-        st.markdown("## 🔐 VEO Video Generation - Login Required")
-        st.text_input(
-            "Password", type="password", on_change=password_entered, key="password"
-        )
-        st.info("💡 This app is password protected. Contact the administrator for access.")
-        return False
-    # Password not correct, show input + error
-    elif not st.session_state["password_correct"]:
-        st.markdown("## 🔐 VEO Video Generation - Login Required")
-        st.text_input(
-            "Password", type="password", on_change=password_entered, key="password"
-        )
-        st.error("😕 Password incorrect")
-        return False
-    else:
-        # Password correct
-        return True
-
-if not check_password():
-    st.stop()
+from utils.auth import require_password
+require_password()
 
 # Rest of the app (same as streamlit_app.py)
 # Custom CSS

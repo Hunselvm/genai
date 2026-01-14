@@ -10,6 +10,10 @@ from datetime import datetime
 
 st.set_page_config(page_title="History", page_icon="📜", layout="wide")
 
+# Password protection
+from utils.auth import require_password
+require_password()
+
 st.title("📜 Generation History")
 
 # Render Sidebar

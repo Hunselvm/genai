@@ -14,6 +14,10 @@ import os
 
 st.set_page_config(page_title="Ingredients to Video", page_icon="🎨", layout="wide")
 
+# Password protection
+from utils.auth import require_password
+require_password()
+
 # Custom CSS
 st.markdown("""
 <style>

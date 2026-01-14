@@ -21,6 +21,10 @@ from utils.sidebar import render_sidebar
 
 st.set_page_config(page_title="B-ROLL Images", page_icon="📦", layout="wide")
 
+# Password protection
+from utils.auth import require_password
+require_password()
+
 # Custom CSS
 st.markdown("""
 <style>

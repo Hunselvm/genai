@@ -82,15 +82,17 @@ Both interfaces share common utilities in the `utils/` directory.
 - Timeout protection: raises error if no events received for 30 seconds
 
 **Streamlit Pages Architecture**
-- `streamlit_app.py` - Main entry point with password protection (uses `st.secrets["app_password"]`)
+- `streamlit_app.py` - Main entry point with password protection (uses `utils/auth.py`)
 - `pages/` directory contains numbered pages that appear in sidebar:
-  - `1_📝_Text_to_Video.py` - Text prompt → video
-  - `2_🖼️_Frames_to_Video.py` - Start/end frame interpolation
-  - `3_🎨_Ingredients_to_Video.py` - Multiple reference images → video
-  - `4_🎨_Create_Image.py` - Image generation
-  - `5_📜_History.py` - View past generations
-  - `6_📦_Batch_Images.py` - Bulk image processing
-  - `7_🎬_Batch_ARoll.py` - Parallel A-roll video generation from reference frame + prompts
+  - `0_🎯_Solo_Generation.py` - Introduction to solo generation modes
+  - `1a_📝_Text_to_Video.py` - Text prompt → video
+  - `1b_🖼️_Frames_to_Video.py` - Start/end frame interpolation
+  - `1c_🎨_Ingredients_to_Video.py` - Multiple reference images → video
+  - `1d_🎨_Create_Image.py` - Image generation
+  - `2_📜_History.py` - View past generations
+  - `3_🎬_A-ROLL_Footage.py` - Parallel A-roll video generation (single frame + multiple prompts)
+  - `4_📦_B-ROLL_Images.py` - Batch image generation with prompts
+  - `5_🎥_B-ROLL_Footage.py` - Parallel B-roll video generation (multiple frames matched to prompts)
 
 **Shared Sidebar (`utils/sidebar.py`)**
 - Standard component rendered across all Streamlit pages
@@ -181,8 +183,11 @@ Key session state variables:
 ### Password Protection
 - Password is stored in `.streamlit/secrets.toml` as `app_password`
 - Default fallback: `"changeme123"`
-- Password check happens at app entry point before any content renders
+- Shared authentication utility: `utils/auth.py` provides `require_password()` function
+- All pages call `require_password()` after `set_page_config()` to enforce authentication
+- Session state `st.session_state.password_correct` tracks authentication across all pages
 - Logout clears `st.session_state.password_correct` and triggers rerun
+- Users cannot bypass authentication by directly accessing page URLs
 
 ### Debugging
 - Enable debug mode in VEOClient constructor: `debug=True`
