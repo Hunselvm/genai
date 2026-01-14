@@ -19,6 +19,7 @@ from utils.exceptions import VEOAPIError, AuthenticationError, QuotaExceededErro
 from utils.logger import StreamlitLogger
 from utils.quota_display import display_quota
 from utils.sidebar import render_sidebar
+from utils.retry_handler import RetryHandler
 
 st.set_page_config(page_title="B-ROLL Footage", page_icon="🎥", layout="wide")
 
@@ -274,8 +275,7 @@ class BatchBRollVideoGenerator:
         aspect_ratio: str,
         number_of_videos: int,
         image_number: int,
-        image_bytes_dict: Dict[int, bytes],
-        max_retries: int = 3
+        image_bytes_dict: Dict[int, bytes]
     ) -> Optional[Dict]:
         """Generate videos for a single prompt with its specific reference image."""
         # Verify image exists
@@ -304,112 +304,101 @@ class BatchBRollVideoGenerator:
                 os.fsync(tmp.fileno())  # Force OS to write to disk
                 start_frame_path = tmp.name
 
-            retry_count = 0
-            base_delay = 2  # Start with 2 seconds
+            # Define the generation function to be retried
+            async def do_generation():
+                self.progress[prompt_id] = {
+                    'status': 'processing',
+                    'percentage': 0,
+                    'image_number': image_number
+                }
 
-            while retry_count <= max_retries:
-                try:
-                    self.progress[prompt_id] = {
-                        'status': 'processing',
-                        'percentage': 0,
-                        'retry': retry_count if retry_count > 0 else None,
-                        'image_number': image_number
-                    }
+                async with self.client.frames_to_video_stream(
+                    start_frame_path=start_frame_path,
+                    end_frame_path=None,  # No end frame for B-Roll (only start frame)
+                    prompt=prompt,
+                    aspect_ratio=aspect_ratio,
+                    number_of_videos=number_of_videos
+                ) as response:
+                    async for event_data in parse_sse_stream(response, logger=self.logger):
+                        # Update progress
+                        percentage = event_data.get('process_percentage', 0)
+                        status = event_data.get('status', 'processing')
 
-                    async with self.client.frames_to_video_stream(
-                        start_frame_path=start_frame_path,
-                        end_frame_path=None,  # No end frame for B-Roll (only start frame)
-                        prompt=prompt,
-                        aspect_ratio=aspect_ratio,
-                        number_of_videos=number_of_videos
-                    ) as response:
-                        async for event_data in parse_sse_stream(response, logger=self.logger):
-                            # Update progress
-                            percentage = event_data.get('process_percentage', 0)
-                            status = event_data.get('status', 'processing')
+                        self.progress[prompt_id] = {
+                            'status': status,
+                            'percentage': percentage,
+                            'image_number': image_number
+                        }
 
-                            self.progress[prompt_id] = {
-                                'status': status,
-                                'percentage': percentage,
-                                'retry': retry_count if retry_count > 0 else None,
-                                'image_number': image_number
+                        if status == 'completed':
+                            # Fetch video bytes for reliable downloading
+                            video_bytes_list = []
+                            file_urls = event_data.get('file_urls', [])
+                            if not file_urls and event_data.get('file_url'):
+                                file_urls = [event_data.get('file_url')]
+
+                            if file_urls:
+                                try:
+                                    async with httpx.AsyncClient() as client:
+                                        for url in file_urls:
+                                            resp = await client.get(url, timeout=60.0)
+                                            if resp.status_code == 200:
+                                                video_bytes_list.append(resp.content)
+                                except Exception as e:
+                                    if self.logger:
+                                        self.logger.error(f"Failed to download video bytes: {str(e)}")
+
+                            self.results[prompt_id] = {
+                                'status': 'completed',
+                                'data': event_data,
+                                'prompt': prompt,
+                                'image_number': image_number,
+                                'number_of_videos': number_of_videos,
+                                'video_bytes_list': video_bytes_list
                             }
+                            return event_data
 
-                            if status == 'completed':
-                                # Fetch video bytes for reliable downloading
-                                video_bytes_list = []
-                                file_urls = event_data.get('file_urls', [])
-                                if not file_urls and event_data.get('file_url'):
-                                    file_urls = [event_data.get('file_url')]
+                        elif status == 'failed':
+                            error_msg = event_data.get('error', 'Generation failed')
+                            raise Exception(error_msg)
 
-                                if file_urls:
-                                    try:
-                                        async with httpx.AsyncClient() as client:
-                                            for url in file_urls:
-                                                resp = await client.get(url, timeout=60.0)
-                                                if resp.status_code == 200:
-                                                    video_bytes_list.append(resp.content)
-                                    except Exception as e:
-                                        if self.logger:
-                                            self.logger.error(f"Failed to download video bytes: {str(e)}")
+            # Callback for retry progress updates
+            def on_retry_callback(retry_count: int, delay: float, error_msg: str):
+                self.progress[prompt_id] = {
+                    'status': 'retrying',
+                    'percentage': 0,
+                    'retry': retry_count,
+                    'delay': delay,
+                    'error': error_msg[:100],
+                    'image_number': image_number
+                }
 
-                                self.results[prompt_id] = {
-                                    'status': 'completed',
-                                    'data': event_data,
-                                    'prompt': prompt,
-                                    'image_number': image_number,
-                                    'number_of_videos': number_of_videos,
-                                    'video_bytes_list': video_bytes_list
-                                }
-                                return event_data
-
-                            elif status == 'failed':
-                                error_msg = event_data.get('error', 'Generation failed')
-                                raise Exception(error_msg)
-
-                except Exception as e:
-                    error_str = str(e)
-
-                    # Check if it's a retryable error (403 reCAPTCHA or 500 server error)
-                    is_recaptcha_error = '403' in error_str and 'recaptcha' in error_str.lower()
-                    is_server_error = '500' in error_str
-                    is_retryable = is_recaptcha_error or is_server_error
-
-                    if is_retryable and retry_count < max_retries:
-                        retry_count += 1
-                        delay = base_delay * (2 ** (retry_count - 1))  # Exponential backoff: 2s, 4s, 8s
-
-                        error_type = "reCAPTCHA error" if is_recaptcha_error else "Server error"
-                        if self.logger:
-                            self.logger.warning(f"{error_type} for '{prompt_id}', retrying in {delay}s (attempt {retry_count}/{max_retries})...")
-
-                        self.progress[prompt_id] = {
-                            'status': 'retrying',
-                            'percentage': 0,
-                            'retry': retry_count,
-                            'delay': delay,
-                            'image_number': image_number
-                        }
-
-                        await asyncio.sleep(delay)
-                        continue  # Retry
-                    else:
-                        # Final failure or non-retryable error
-                        self.progress[prompt_id] = {
-                            'status': 'failed',
-                            'percentage': 0,
-                            'error': error_str,
-                            'image_number': image_number
-                        }
-                        self.results[prompt_id] = {
-                            'status': 'failed',
-                            'error': error_str,
-                            'prompt': prompt,
-                            'image_number': image_number
-                        }
-                        if self.logger:
-                            self.logger.error(f"Failed to generate for '{prompt}': {error_str}")
-                        return None
+            # Execute with retry logic using shared handler
+            try:
+                result = await RetryHandler.retry_with_backoff(
+                    do_generation,
+                    logger=self.logger,
+                    on_retry=on_retry_callback
+                )
+                return result
+            except Exception as e:
+                # Final failure after all retries exhausted
+                error_str = str(e)
+                self.progress[prompt_id] = {
+                    'status': 'failed',
+                    'percentage': 0,
+                    'error': error_str,
+                    'image_number': image_number
+                }
+                self.results[prompt_id] = {
+                    'status': 'failed',
+                    'error': error_str,
+                    'prompt': prompt,
+                    'image_number': image_number
+                }
+                if self.logger:
+                    self.logger.error(f"Failed to generate for '{prompt}': {error_str}")
+                return None
 
         finally:
             # CRITICAL: Cleanup temp file immediately
@@ -418,9 +407,6 @@ class BatchBRollVideoGenerator:
                     os.unlink(start_frame_path)
                 except:
                     pass
-
-        # Should not reach here, but just in case
-        return None
 
     async def generate_batch(
         self,
