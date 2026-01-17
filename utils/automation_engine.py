@@ -12,7 +12,7 @@ import time
 import tempfile
 import zipfile
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from typing import List, Dict, Optional, Callable, Any
@@ -58,49 +58,26 @@ class ErrorCategory(Enum):
 
 
 PERMANENT_ERROR_PATTERNS = [
-    "content policy",
-    "blocked",
-    "authentication",
-    "unauthorized",
-    "forbidden",
-    "invalid api key",
-    "account suspended",
-    "inappropriate",
-    "violates",
-    "not allowed"
+    "content policy", "blocked", "authentication", "unauthorized", "forbidden",
+    "invalid api key", "account suspended", "inappropriate", "violates", "not allowed"
 ]
 
 RETRYABLE_ERROR_PATTERNS = [
-    "timeout",
-    "timed out",
-    "rate limit",
-    "too many requests",
-    "server error",
-    "internal error",
-    "503",
-    "502",
-    "500",
-    "connection",
-    "network",
-    "temporarily",
-    "try again",
-    "overloaded",
-    "recaptcha"
+    "timeout", "timed out", "rate limit", "too many requests", "server error",
+    "internal error", "503", "502", "500", "connection", "network",
+    "temporarily", "try again", "overloaded", "recaptcha"
 ]
 
 
 def categorize_error(error_msg: str) -> ErrorCategory:
     """Categorize an error message to determine retry strategy."""
     error_lower = error_msg.lower()
-    
     for pattern in PERMANENT_ERROR_PATTERNS:
         if pattern in error_lower:
             return ErrorCategory.PERMANENT
-    
     for pattern in RETRYABLE_ERROR_PATTERNS:
         if pattern in error_lower:
             return ErrorCategory.RETRYABLE
-    
     return ErrorCategory.UNKNOWN
 
 
@@ -120,17 +97,13 @@ class RateLimiter:
         """Wait until we can make a request without exceeding rate limit."""
         async with self._lock:
             now = time.time()
-            
-            # Remove timestamps older than 1 minute
             while self.timestamps and now - self.timestamps[0] > 60:
                 self.timestamps.popleft()
             
-            # If at limit, wait
             if len(self.timestamps) >= self.rpm:
                 sleep_time = 60 - (now - self.timestamps[0]) + 0.1
                 if sleep_time > 0:
                     await asyncio.sleep(sleep_time)
-                    # Clean up again after sleeping
                     now = time.time()
                     while self.timestamps and now - self.timestamps[0] > 60:
                         self.timestamps.popleft()
@@ -147,7 +120,7 @@ class ProcessingItem:
     """Represents an item to be processed."""
     id: str
     prompt: str
-    count: int = 1  # number_of_images or number_of_videos
+    count: int = 1
     reference_frame_url: Optional[str] = None
     reference_frame_path: Optional[str] = None
 
@@ -161,7 +134,10 @@ class ProcessingResult:
     urls: List[str] = field(default_factory=list)
     error: Optional[str] = None
     error_category: Optional[str] = None
-    bytes_list: List[bytes] = field(default_factory=list)
+    file_paths: List[str] = field(default_factory=list)
+    
+    def __getitem__(self, key):
+        return getattr(self, key)
     
     def to_dict(self) -> Dict:
         return {
@@ -170,8 +146,15 @@ class ProcessingResult:
             'status': self.status,
             'urls': self.urls,
             'error': self.error,
-            'error_category': self.error_category
+            'error_category': self.error_category,
+            'file_paths': self.file_paths
         }
+    
+    @classmethod
+    def from_dict(cls, data: Dict):
+        valid_keys = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in data.items() if k in valid_keys}
+        return cls(**filtered)
 
 
 # =============================================================================
@@ -180,23 +163,32 @@ class ProcessingResult:
 
 def validate_prompts(items: List[Dict]) -> tuple[List[Dict], List[str]]:
     """Validate prompts before processing.
-    
-    Returns:
-        Tuple of (valid_items, error_messages)
+    Checks 'prompt', 'image_prompt', and 'video_prompt' keys.
     """
     valid = []
     errors = []
     
     for item in items:
-        prompt = item.get('prompt', '').strip()
         item_id = item.get('id', 'unknown')
+        item_errors = []
         
-        if not prompt:
-            errors.append(f"{item_id}: Empty prompt")
-        elif len(prompt) < 10:
-            errors.append(f"{item_id}: Too short (min 10 chars, got {len(prompt)})")
-        elif len(prompt) > 2000:
-            errors.append(f"{item_id}: Too long (max 2000 chars, got {len(prompt)})")
+        # Check all potential prompt fields
+        fields_to_check = []
+        if 'prompt' in item: fields_to_check.append(('prompt', item['prompt']))
+        if 'image_prompt' in item: fields_to_check.append(('image_prompt', item['image_prompt']))
+        if 'video_prompt' in item: fields_to_check.append(('video_prompt', item['video_prompt']))
+        
+        for name, val in fields_to_check:
+            val = str(val).strip()
+            if not val:
+                item_errors.append(f"{name}: Empty")
+            elif len(val) < 10:
+                item_errors.append(f"{name}: Too short (min 10 chars)")
+            elif len(val) > 2000:
+                item_errors.append(f"{name}: Too long (max 2000 chars)")
+        
+        if item_errors:
+            errors.append(f"{item_id}: " + ", ".join(item_errors))
         else:
             valid.append(item)
     
@@ -230,32 +222,20 @@ class AutomationEngine:
         self._stop_requested = False
     
     def request_stop(self):
-        """Request graceful stop of processing."""
         self._stop_requested = True
     
     def _emit_progress(self, event_type: str, data: Dict):
-        """Emit progress event if callback is set."""
         if self.progress_callback:
             self.progress_callback(event_type, data)
     
     def _log(self, level: str, message: str):
-        """Log a message if logger is available."""
         if self.logger:
-            if level == 'info':
-                self.logger.info(message)
-            elif level == 'success':
-                self.logger.success(message)
-            elif level == 'warning':
-                self.logger.warning(message)
-            elif level == 'error':
-                self.logger.error(message)
+            if level == 'info': self.logger.info(message)
+            elif level == 'success': self.logger.success(message)
+            elif level == 'warning': self.logger.warning(message)
+            elif level == 'error': self.logger.error(message)
     
-    async def _poll_with_backoff(
-        self,
-        item: ProcessingItem,
-        check_func: Callable
-    ) -> Optional[Dict]:
-        """Poll for completion with exponential backoff."""
+    async def _poll_with_backoff(self, item: ProcessingItem, check_func: Callable) -> Optional[Dict]:
         start_time = time.time()
         poll_interval = self.config['initial_poll_seconds']
         
@@ -264,448 +244,265 @@ class AutomationEngine:
             timeout_seconds = self.config['timeout_minutes'] * 60
             
             if elapsed > timeout_seconds:
-                raise TimeoutError(
-                    f"Generation exceeded {self.config['timeout_minutes']}min timeout"
-                )
+                raise TimeoutError(f"Generation exceeded {self.config['timeout_minutes']}min timeout")
             
             await asyncio.sleep(poll_interval)
             
             try:
                 result = await check_func(item)
                 if result:
-                    if result.get('status') == 'completed':
-                        return result
+                    if result.get('status') == 'completed': return result
                     elif result.get('status') == 'failed':
                         raise Exception(result.get('error', 'Generation failed'))
             except Exception as e:
-                if 'completed' in str(e) or 'failed' in str(e):
-                    raise
+                if 'completed' in str(e) or 'failed' in str(e): raise
                 self._log('warning', f"Poll error for {item.id}: {e}")
             
-            # Exponential backoff with cap
-            poll_interval = min(
-                poll_interval * 1.5,
-                self.config['max_poll_seconds']
-            )
+            poll_interval = min(poll_interval * 1.5, self.config['max_poll_seconds'])
     
     async def _check_history_for_item(self, item: ProcessingItem) -> Optional[Dict]:
-        """Check generation history for a completed item."""
         try:
             history = await self.client.get_histories(page=1, page_size=10)
-            if not history or not history.get('data'):
-                return None
-            
+            if not history or not history.get('data'): return None
             for hist_item in history['data']:
                 hist_prompt = hist_item.get('prompt', '').lower()
                 if item.prompt.lower() in hist_prompt or hist_prompt in item.prompt.lower():
                     return hist_item
-            
             return None
         except Exception as e:
             self._log('warning', f"History check failed: {e}")
             return None
     
-    async def _download_content(self, urls: List[str]) -> List[bytes]:
-        """Download content from URLs."""
-        bytes_list = []
+    async def _download_content(self, urls: List[str]) -> List[str]:
+        """Download content to temporary files. Returns file paths."""
+        paths = []
         async with httpx.AsyncClient(timeout=60.0) as client:
             for url in urls:
                 try:
-                    resp = await client.get(url)
-                    if resp.status_code == 200:
-                        bytes_list.append(resp.content)
+                    ext = '.mp4' if '/video' in url or url.endswith('.mp4') else '.png'
+                    fd, path = tempfile.mkstemp(suffix=ext)
+                    os.close(fd)
+                    
+                    self._log('info', f"Downloading {url} to {path}")
+                    async with client.stream('GET', url) as resp:
+                        resp.raise_for_status()
+                        with open(path, 'wb') as f:
+                            async for chunk in resp.aiter_bytes():
+                                f.write(chunk)
+                    paths.append(path)
                 except Exception as e:
-                    self._log('warning', f"Download failed: {e}")
-        return bytes_list
+                    self._log('warning', f"Download failed for {url}: {e}")
+                    # Try to cleanup empty file
+                    if 'path' in locals() and os.path.exists(path):
+                        try: os.unlink(path)
+                        except: pass
+        return paths
     
-    async def generate_single_image(
-        self,
-        item: ProcessingItem,
-        aspect_ratio: str
-    ) -> ProcessingResult:
-        """Generate images for a single prompt."""
+    async def generate_single_image(self, item: ProcessingItem, aspect_ratio: str) -> ProcessingResult:
         async with self.semaphore:
             await self.rate_limiter.acquire()
-            
             if self._stop_requested:
-                return ProcessingResult(
-                    id=item.id,
-                    prompt=item.prompt,
-                    status='failed',
-                    error='Processing stopped by user'
-                )
+                return ProcessingResult(item.id, item.prompt, 'failed', error='Stopped by user')
             
             self._emit_progress('item_started', {'id': item.id, 'prompt': item.prompt})
-            self._log('info', f"Starting image generation: {item.id}")
             
             try:
                 result = None
-                
-                # Try SSE stream first
                 try:
                     async with self.client.create_image_stream(
-                        prompt=item.prompt,
-                        aspect_ratio=aspect_ratio,
-                        number_of_images=item.count,
-                        reference_images=[item.reference_frame_path] if item.reference_frame_path else None
+                        item.prompt, aspect_ratio, item.count,
+                        [item.reference_frame_path] if item.reference_frame_path else None
                     ) as response:
                         async for event_data in parse_sse_stream(response, logger=self.logger):
-                            status = event_data.get('status', 'processing')
-                            
-                            if status == 'completed':
+                            if event_data.get('status') == 'completed':
                                 result = event_data
                                 break
-                            elif status == 'failed':
+                            elif event_data.get('status') == 'failed':
                                 raise Exception(event_data.get('error', 'Generation failed'))
-                except Exception as stream_error:
-                    self._log('warning', f"Stream failed for {item.id}: {stream_error}, switching to polling")
-                
-                # If no result from stream, poll history
-                if not result:
-                    result = await self._poll_with_backoff(
-                        item,
-                        self._check_history_for_item
-                    )
+                except Exception as e:
+                    self._log('warning', f"Stream error: {e}, switching to polling")
                 
                 if not result:
-                    raise Exception("No result received")
+                    result = await self._poll_with_backoff(item, self._check_history_for_item)
                 
-                # Extract URLs
-                urls = result.get('file_urls', [])
-                if not urls and result.get('file_url'):
-                    urls = [result.get('file_url')]
+                if not result: raise Exception("No result received")
                 
-                # Download content
-                bytes_list = await self._download_content(urls)
+                urls = result.get('file_urls', []) or [result.get('file_url')]
+                file_paths = await self._download_content(urls)
                 
-                self._log('success', f"Completed: {item.id}")
                 self._emit_progress('item_completed', {'id': item.id, 'urls': urls})
-                
-                return ProcessingResult(
-                    id=item.id,
-                    prompt=item.prompt,
-                    status='completed',
-                    urls=urls,
-                    bytes_list=bytes_list
-                )
+                return ProcessingResult(item.id, item.prompt, 'completed', urls=urls, file_paths=file_paths)
             
             except Exception as e:
                 error_msg = str(e)
                 error_cat = categorize_error(error_msg)
-                
-                self._log('error', f"Failed: {item.id} - {error_msg}")
-                self._emit_progress('item_failed', {
-                    'id': item.id,
-                    'error': error_msg,
-                    'category': error_cat.value
-                })
-                
-                return ProcessingResult(
-                    id=item.id,
-                    prompt=item.prompt,
-                    status='failed',
-                    error=error_msg,
-                    error_category=error_cat.value
-                )
-    
-    async def generate_single_video(
-        self,
-        item: ProcessingItem,
-        aspect_ratio: str,
-        start_frame_path: Optional[str] = None
-    ) -> ProcessingResult:
-        """Generate videos for a single prompt."""
+                self._emit_progress('item_failed', {'id': item.id, 'error': error_msg, 'category': error_cat.value})
+                return ProcessingResult(item.id, item.prompt, 'failed', error=error_msg, error_category=error_cat.value)
+
+    async def generate_single_video(self, item: ProcessingItem, aspect_ratio: str, start_frame_path: Optional[str] = None) -> ProcessingResult:
         async with self.semaphore:
             await self.rate_limiter.acquire()
-            
             if self._stop_requested:
-                return ProcessingResult(
-                    id=item.id,
-                    prompt=item.prompt,
-                    status='failed',
-                    error='Processing stopped by user'
-                )
+                return ProcessingResult(item.id, item.prompt, 'failed', error='Stopped by user')
             
             self._emit_progress('item_started', {'id': item.id, 'prompt': item.prompt})
-            self._log('info', f"Starting video generation: {item.id}")
-            
-            # Use item's reference frame if provided, otherwise use passed frame
             frame_path = item.reference_frame_path or start_frame_path
             
             try:
                 result = None
-                
-                # Try SSE stream first
                 try:
                     if frame_path:
-                        # Frames to video
-                        async with self.client.frames_to_video_stream(
-                            start_frame_path=frame_path,
-                            end_frame_path=None,
-                            prompt=item.prompt,
-                            aspect_ratio=aspect_ratio,
-                            number_of_videos=item.count
-                        ) as response:
-                            async for event_data in parse_sse_stream(response, logger=self.logger):
-                                status = event_data.get('status', 'processing')
-                                
-                                if status == 'completed':
-                                    result = event_data
-                                    break
-                                elif status == 'failed':
-                                    raise Exception(event_data.get('error', 'Generation failed'))
+                        gen_func = self.client.frames_to_video_stream(frame_path, None, item.prompt, aspect_ratio, item.count)
                     else:
-                        # Text to video
-                        async with self.client.text_to_video_stream(
-                            prompt=item.prompt,
-                            aspect_ratio=aspect_ratio,
-                            number_of_videos=item.count
-                        ) as response:
-                            async for event_data in parse_sse_stream(response, logger=self.logger):
-                                status = event_data.get('status', 'processing')
-                                
-                                if status == 'completed':
-                                    result = event_data
-                                    break
-                                elif status == 'failed':
-                                    raise Exception(event_data.get('error', 'Generation failed'))
-                
-                except Exception as stream_error:
-                    self._log('warning', f"Stream failed for {item.id}: {stream_error}, switching to polling")
-                
-                # If no result from stream, poll history
-                if not result:
-                    result = await self._poll_with_backoff(
-                        item,
-                        self._check_history_for_item
-                    )
+                        gen_func = self.client.text_to_video_stream(item.prompt, aspect_ratio, item.count)
+                        
+                    async with gen_func as response:
+                        async for event_data in parse_sse_stream(response, logger=self.logger):
+                            if event_data.get('status') == 'completed':
+                                result = event_data
+                                break
+                            elif event_data.get('status') == 'failed':
+                                raise Exception(event_data.get('error', 'Generation failed'))
+                except Exception as e:
+                    self._log('warning', f"Stream error: {e}, switching to polling")
                 
                 if not result:
-                    raise Exception("No result received")
+                    result = await self._poll_with_backoff(item, self._check_history_for_item)
                 
-                # Extract URLs
-                urls = result.get('file_urls', [])
-                if not urls and result.get('file_url'):
-                    urls = [result.get('file_url')]
+                if not result: raise Exception("No result received")
                 
-                # Download content
-                bytes_list = await self._download_content(urls)
+                urls = result.get('file_urls', []) or [result.get('file_url')]
+                file_paths = await self._download_content(urls)
                 
-                self._log('success', f"Completed: {item.id}")
                 self._emit_progress('item_completed', {'id': item.id, 'urls': urls})
-                
-                return ProcessingResult(
-                    id=item.id,
-                    prompt=item.prompt,
-                    status='completed',
-                    urls=urls,
-                    bytes_list=bytes_list
-                )
+                return ProcessingResult(item.id, item.prompt, 'completed', urls=urls, file_paths=file_paths)
             
             except Exception as e:
                 error_msg = str(e)
                 error_cat = categorize_error(error_msg)
-                
-                self._log('error', f"Failed: {item.id} - {error_msg}")
-                self._emit_progress('item_failed', {
-                    'id': item.id,
-                    'error': error_msg,
-                    'category': error_cat.value
-                })
-                
-                return ProcessingResult(
-                    id=item.id,
-                    prompt=item.prompt,
-                    status='failed',
-                    error=error_msg,
-                    error_category=error_cat.value
-                )
-    
-    async def generate_images_batch(
-        self,
-        items: List[Dict],
-        aspect_ratio: str,
-        job: Optional[AutomationJob] = None
-    ) -> Dict[str, ProcessingResult]:
-        """Generate images for multiple prompts in parallel."""
-        self._emit_progress('batch_started', {
-            'total': len(items),
-            'content_type': 'images'
-        })
-        
+                self._emit_progress('item_failed', {'id': item.id, 'error': error_msg, 'category': error_cat.value})
+                return ProcessingResult(item.id, item.prompt, 'failed', error=error_msg, error_category=error_cat.value)
+
+    async def generate_images_batch(self, items: List[Dict], aspect_ratio: str, job: Optional[AutomationJob] = None) -> Dict[str, ProcessingResult]:
+        self._emit_progress('batch_started', {'total': len(items), 'content_type': 'images'})
         tasks = []
-        for item_dict in items:
-            proc_item = ProcessingItem(
-                id=item_dict['id'],
-                prompt=item_dict['prompt'],
-                count=item_dict.get('number_of_images', 1),
-                reference_frame_path=item_dict.get('reference_frame_path')
-            )
-            
-            task = asyncio.create_task(
-                self._process_and_save(
-                    self.generate_single_image(proc_item, aspect_ratio),
-                    proc_item.id,
-                    job
-                )
-            )
-            tasks.append(task)
-        
-        await asyncio.gather(*tasks, return_exceptions=True)
-        
-        self._emit_progress('batch_completed', {
-            'completed': sum(1 for r in self.results.values() if r.status == 'completed'),
-            'failed': sum(1 for r in self.results.values() if r.status == 'failed')
-        })
-        
+        for d in items:
+            item = ProcessingItem(d['id'], d['prompt'], d.get('number_of_images', 1), reference_frame_path=d.get('reference_frame_path'))
+            tasks.append(asyncio.create_task(self._process_and_save(self.generate_single_image(item, aspect_ratio), item.id, job)))
+        await asyncio.gather(*tasks)
+        return self.results
+
+    async def generate_videos_batch(self, items: List[Dict], aspect_ratio: str, start_frame_path: Optional[str] = None, job: Optional[AutomationJob] = None) -> Dict[str, ProcessingResult]:
+        self._emit_progress('batch_started', {'total': len(items), 'content_type': 'videos'})
+        tasks = []
+        for d in items:
+            item = ProcessingItem(d['id'], d['prompt'], d.get('number_of_videos', 1), reference_frame_path=d.get('reference_frame_path'))
+            tasks.append(asyncio.create_task(self._process_and_save(self.generate_single_video(item, aspect_ratio, start_frame_path), item.id, job)))
+        await asyncio.gather(*tasks)
         return self.results
     
-    async def generate_videos_batch(
-        self,
-        items: List[Dict],
-        aspect_ratio: str,
-        start_frame_path: Optional[str] = None,
-        job: Optional[AutomationJob] = None
-    ) -> Dict[str, ProcessingResult]:
-        """Generate videos for multiple prompts in parallel."""
-        self._emit_progress('batch_started', {
-            'total': len(items),
-            'content_type': 'videos'
-        })
-        
-        tasks = []
-        for item_dict in items:
-            proc_item = ProcessingItem(
-                id=item_dict['id'],
-                prompt=item_dict['prompt'],
-                count=item_dict.get('number_of_videos', 1),
-                reference_frame_path=item_dict.get('reference_frame_path')
-            )
-            
-            task = asyncio.create_task(
-                self._process_and_save(
-                    self.generate_single_video(proc_item, aspect_ratio, start_frame_path),
-                    proc_item.id,
-                    job
-                )
-            )
-            tasks.append(task)
-        
-        await asyncio.gather(*tasks, return_exceptions=True)
-        
-        self._emit_progress('batch_completed', {
-            'completed': sum(1 for r in self.results.values() if r.status == 'completed'),
-            'failed': sum(1 for r in self.results.values() if r.status == 'failed')
-        })
-        
-        return self.results
-    
-    async def _process_and_save(
-        self,
-        coro,
-        item_id: str,
-        job: Optional[AutomationJob] = None
-    ):
-        """Process item and save result to job if provided."""
+    async def _process_and_save(self, coro, item_id: str, job: Optional[AutomationJob]):
         result = await coro
         self.results[item_id] = result
-        
         if job:
             job.update_result(item_id, result.to_dict())
             save_job(job)
-    
-    async def run_broll_pipeline(
-        self,
-        items: List[Dict],
-        aspect_ratio: str,
-        job: Optional[AutomationJob] = None
-    ) -> Dict[str, Dict]:
-        """Run complete B-Roll pipeline: Images -> Videos.
-        
-        Returns dict with both image and video results per item.
-        """
+
+    async def run_broll_pipeline(self, items: List[Dict], aspect_ratio: str, job: Optional[AutomationJob] = None) -> Dict[str, Dict]:
+        """Run B-Roll pipeline (Image -> Video) with suffix-based ID management and smart resume."""
         pipeline_results = {}
         
-        # Step 1: Generate images
-        self._emit_progress('step_started', {'step': 1, 'name': 'Generating images'})
+        # Define suffix IDs
+        items_map = {}
+        for item in items:
+            items_map[item['id']] = {
+                'raw': item,
+                'img_id': f"{item['id']}_img",
+                'vid_id': f"{item['id']}_vid"
+            }
+        
+        # ---- Step 1: Images ----
+        self._emit_progress('step_started', {'step': 1, 'name': 'Generating B-Roll Images'})
         if job:
             job.current_step = 'images'
             job.status = 'running'
             save_job(job)
         
-        image_engine = AutomationEngine(
-            client=self.client,
-            content_type='images',
-            progress_callback=self.progress_callback,
-            logger=self.logger
-        )
+        # Filter: Check if image task already completed in job history AND files exist
+        image_work_items = []
+        existing_results = job.results if job else {}
         
-        image_results = await image_engine.generate_images_batch(items, aspect_ratio, job)
-        
-        # Initialize pipeline results with image data
-        for item_id, result in image_results.items():
-            pipeline_results[item_id] = {
-                'id': item_id,
-                'prompt': result.prompt,
-                'image_status': result.status,
-                'image_urls': result.urls,
-                'image_error': result.error
-            }
-        
-        # Step 2: Generate videos using images
-        self._emit_progress('step_started', {'step': 2, 'name': 'Generating videos'})
-        if job:
-            job.current_step = 'videos'
-            save_job(job)
-        
-        # Prepare video items with image frames
-        video_items = []
-        for item_id, result in image_results.items():
-            if result.status == 'completed' and result.urls:
-                # Download image to temp file for use as frame
-                image_path = None
-                if result.bytes_list:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmp:
-                        tmp.write(result.bytes_list[0])
-                        tmp.flush()
-                        image_path = tmp.name
-                
-                video_items.append({
-                    'id': item_id,
-                    'prompt': result.prompt,
-                    'number_of_videos': 1,
-                    'reference_frame_path': image_path
+        for item in items:
+            meta = items_map[item['id']]
+            
+            # Check for existing result
+            cached = existing_results.get(meta['img_id'])
+            files_ok = False
+            if cached and cached.get('status') == 'completed' and cached.get('file_paths'):
+                # Check if file actually exists
+                if os.path.exists(cached['file_paths'][0]):
+                    files_ok = True
+            
+            if not files_ok:
+                image_work_items.append({
+                    'id': meta['img_id'],
+                    'prompt': item.get('image_prompt', item.get('prompt')),
+                    'number_of_images': item.get('number_of_images', 1),
+                    'reference_frame_path': item.get('image_reference_frame_path')
                 })
         
-        if video_items:
-            video_engine = AutomationEngine(
-                client=self.client,
-                content_type='videos',
-                progress_callback=self.progress_callback,
-                logger=self.logger
-            )
-            
-            video_results = await video_engine.generate_videos_batch(video_items, aspect_ratio, job=job)
-            
-            # Merge video results
-            for item_id, result in video_results.items():
-                if item_id in pipeline_results:
-                    pipeline_results[item_id]['video_status'] = result.status
-                    pipeline_results[item_id]['video_urls'] = result.urls
-                    pipeline_results[item_id]['video_error'] = result.error
-            
-            # Cleanup temp image files
-            for item in video_items:
-                if item.get('reference_frame_path'):
-                    try:
-                        os.unlink(item['reference_frame_path'])
-                    except:
-                        pass
+        # Run Image Gen
+        if image_work_items:
+            img_engine = AutomationEngine(self.client, 'images', self.progress_callback, self.logger)
+            await img_engine.generate_images_batch(image_work_items, aspect_ratio, job)
         
-        if job:
-            job.status = 'completed'
-            save_job(job)
+        # Refresh results from job (to get what we just generated + what was cached)
+        current_results = job.results if job else {}
         
+        # ---- Step 2: Videos ----
+        self._emit_progress('step_started', {'step': 2, 'name': 'Generating B-Roll Videos'})
+        if job: job.current_step = 'videos'; save_job(job)
+        
+        video_work_items = []
+        
+        for item in items:
+            meta = items_map[item['id']]
+            img_res_dict = current_results.get(meta['img_id'])
+            
+            # Can only proceed if image is done
+            if img_res_dict and img_res_dict.get('status') == 'completed' and img_res_dict.get('file_paths'):
+                # Check cache for video
+                cached_vid = current_results.get(meta['vid_id'])
+                vid_files_ok = False
+                if cached_vid and cached_vid.get('status') == 'completed' and cached_vid.get('file_paths'):
+                     if os.path.exists(cached_vid['file_paths'][0]):
+                         vid_files_ok = True
+                
+                if not vid_files_ok:
+                    video_work_items.append({
+                        'id': meta['vid_id'],
+                        'prompt': item.get('video_prompt', item.get('prompt')),
+                        'number_of_videos': item.get('number_of_videos', 1),
+                        'reference_frame_path': img_res_dict['file_paths'][0]  # Use generated image
+                    })
+        
+        # Run Video Gen
+        if video_work_items:
+            vid_engine = AutomationEngine(self.client, 'videos', self.progress_callback, self.logger)
+            await vid_engine.generate_videos_batch(video_work_items, aspect_ratio, job)
+        
+        # Config final results
+        final_results_source = job.results if job else {}
+        if job: job.status = 'completed'; save_job(job)
+        
+        for item in items:
+            meta = items_map[item['id']]
+            pipeline_results[item['id']] = {
+                'id': item['id'],
+                'image_result': final_results_source.get(meta['img_id']),
+                'video_result': final_results_source.get(meta['vid_id'])
+            }
+            
         return pipeline_results
 
 
@@ -713,59 +510,57 @@ class AutomationEngine:
 # ZIP Creation
 # =============================================================================
 
-def create_chunked_zips(
-    results: Dict[str, ProcessingResult],
-    prefix: str = 'batch',
-    max_size_mb: int = MAX_ZIP_SIZE_MB
-) -> List[tuple[str, bytes]]:
-    """Create ZIP files with content, chunked by size.
-    
-    Returns list of (filename, zip_bytes) tuples.
-    """
+def create_chunked_zips(results: List[Any], prefix: str = 'batch', max_size_mb: int = MAX_ZIP_SIZE_MB) -> List[tuple[str, bytes]]:
+    """Create ZIP files from ProcessingResult objects (or dicts)."""
     zips = []
-    current_files = []
+    current_files = [] # List[(filename, path)]
     current_size = 0
     part_num = 1
     
-    completed_results = [r for r in results.values() if r.status == 'completed']
-    
-    for result in completed_results:
-        for idx, content in enumerate(result.bytes_list):
-            size_mb = len(content) / (1024 * 1024)
+    # Filter for completed
+    completed = []
+    for r in results:
+        # Support dict (resumed) or object (new)
+        status = r['status'] if isinstance(r, dict) else r.status
+        if status == 'completed':
+            completed.append(r)
             
-            # Start new ZIP if this would exceed limit
+    for result in completed:
+        # Access safely
+        file_paths = result['file_paths'] if isinstance(result, dict) else result.file_paths
+        item_id = result['id'] if isinstance(result, dict) else result.id
+        
+        for idx, path in enumerate(file_paths):
+            if not os.path.exists(path): continue
+            
+            size_mb = os.path.getsize(path) / (1024 * 1024)
+            
             if current_size + size_mb > max_size_mb and current_files:
-                zip_bytes = _create_zip_from_files(current_files)
-                zips.append((f"{prefix}_part{part_num}.zip", zip_bytes))
+                zips.append((f"{prefix}_part{part_num}.zip", _create_zip_from_paths(current_files)))
                 current_files = []
                 current_size = 0
                 part_num += 1
             
-            # Determine filename
-            suffix = f"_{idx+1}" if len(result.bytes_list) > 1 else ""
-            ext = '.png' if prefix.endswith('img') else '.mp4'
-            filename = f"{prefix}_{result.id}{suffix}{ext}"
+            # Determine filename in zip
+            suffix = f"_{idx+1}" if len(file_paths) > 1 else ""
+            ext = os.path.splitext(path)[1]
+            filename = f"{prefix}_{item_id}{suffix}{ext}"
             
-            current_files.append((filename, content))
+            current_files.append((filename, path))
             current_size += size_mb
-    
-    # Create final ZIP
+            
     if current_files:
-        zip_bytes = _create_zip_from_files(current_files)
-        if len(zips) > 0:
-            zips.append((f"{prefix}_part{part_num}.zip", zip_bytes))
-        else:
-            zips.append((f"{prefix}.zip", zip_bytes))
-    
+        filename = f"{prefix}_part{part_num}.zip" if zips else f"{prefix}.zip"
+        zips.append((filename, _create_zip_from_paths(current_files)))
+        
     return zips
 
-
-def _create_zip_from_files(files: List[tuple[str, bytes]]) -> bytes:
-    """Create ZIP from list of (filename, content) tuples."""
+def _create_zip_from_paths(files: List[tuple[str, str]]) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for filename, content in files:
-            zf.writestr(filename, content)
+        for arcname, path in files:
+            if os.path.exists(path):
+                zf.write(path, arcname=arcname)
     return buffer.getvalue()
 
 
@@ -773,66 +568,58 @@ def _create_zip_from_files(files: List[tuple[str, bytes]]) -> bytes:
 # CSV Export
 # =============================================================================
 
-def create_results_csv(results: Dict[str, ProcessingResult]) -> str:
-    """Create CSV with all results."""
+def create_results_csv(results: Dict[str, Any]) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(['id', 'prompt', 'status', 'urls', 'error'])
     
-    for result in results.values():
-        writer.writerow([
-            result.id,
-            result.prompt,
-            result.status,
-            ';'.join(result.urls) if result.urls else '',
-            result.error or ''
-        ])
-    
+    for r in results.values():
+         # Handle dict/obj
+        rid = r['id'] if isinstance(r, dict) else r.id
+        prompt = r['prompt'] if isinstance(r, dict) else r.prompt
+        status = r['status'] if isinstance(r, dict) else r.status
+        urls = r['urls'] if isinstance(r, dict) else r.urls
+        err = r['error'] if isinstance(r, dict) else r.error
+        
+        writer.writerow([rid, prompt, status, ';'.join(urls) if urls else '', err or ''])
     return output.getvalue()
 
-
-def create_failed_csv(results: Dict[str, ProcessingResult], retryable_only: bool = True) -> str:
-    """Create CSV with failed prompts for retry."""
+def create_failed_csv(results: Dict[str, Any]) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['id', 'prompt', 'number_of_images'])
+    writer.writerow(['id', 'prompt'])
     
-    for result in results.values():
-        if result.status != 'failed':
-            continue
-        
-        if retryable_only and result.error_category == ErrorCategory.PERMANENT.value:
-            continue
-        
-        writer.writerow([
-            result.id,
-            result.prompt,
-            1
-        ])
-    
+    for r in results.values():
+        status = r['status'] if isinstance(r, dict) else r.status
+        if status == 'failed':
+            cat = r.get('error_category') if isinstance(r, dict) else r.error_category
+            if cat != ErrorCategory.PERMANENT.value:
+                rid = r['id'] if isinstance(r, dict) else r.id
+                prompt = r['prompt'] if isinstance(r, dict) else r.prompt
+                writer.writerow([rid, prompt])
     return output.getvalue()
 
-
-def create_pipeline_csv(results: Dict[str, Dict]) -> str:
-    """Create CSV for B-Roll pipeline results."""
+def create_pipeline_csv(pipeline_results: Dict[str, Dict]) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow([
-        'id', 'prompt', 
-        'image_status', 'image_urls', 'image_error',
-        'video_status', 'video_urls', 'video_error'
+        'id', 'image_status', 'image_url', 'image_error',
+        'video_status', 'video_url', 'video_error'
     ])
     
-    for item_id, data in results.items():
-        writer.writerow([
-            data.get('id', item_id),
-            data.get('prompt', ''),
-            data.get('image_status', ''),
-            ';'.join(data.get('image_urls', [])),
-            data.get('image_error', ''),
-            data.get('video_status', ''),
-            ';'.join(data.get('video_urls', [])),
-            data.get('video_error', '')
-        ])
-    
+    for pid, data in pipeline_results.items():
+        img = data.get('image_result') or {}
+        vid = data.get('video_result') or {}
+        
+        # extract safely
+        i_stat = img.get('status') if isinstance(img, dict) else getattr(img, 'status', '')
+        i_url = (img.get('urls') or [])[0] if isinstance(img, dict) else (img.urls[0] if getattr(img, 'urls', None) else '')
+        i_err = img.get('error') if isinstance(img, dict) else getattr(img, 'error', '')
+        
+        v_stat = vid.get('status') if isinstance(vid, dict) else getattr(vid, 'status', '')
+        v_url = (vid.get('urls') or [])[0] if isinstance(vid, dict) else (vid.urls[0] if getattr(vid, 'urls', None) else '')
+        v_err = vid.get('error') if isinstance(vid, dict) else getattr(vid, 'error', '')
+        
+        writer.writerow([pid, i_stat, i_url, i_err, v_stat, v_url, v_err])
+        
     return output.getvalue()

@@ -167,8 +167,19 @@ if 'auto_is_running' not in st.session_state:
 if 'auto_current_job' not in st.session_state:
     st.session_state.auto_current_job = None
 
-if 'auto_log_messages' not in st.session_state:
     st.session_state.auto_log_messages = []
+
+if 'auto_aroll_items' not in st.session_state:
+    st.session_state.auto_aroll_items = []
+
+if 'auto_broll_items' not in st.session_state:
+    st.session_state.auto_broll_items = []
+
+if 'auto_ref_aroll' not in st.session_state:
+    st.session_state.auto_ref_aroll = None
+
+if 'auto_ref_broll' not in st.session_state:
+    st.session_state.auto_ref_broll = None
 
 
 # =============================================================================
@@ -212,8 +223,9 @@ st.subheader("1. Select Mode")
 
 mode = st.radio(
     "Generation Mode",
-    options=['broll_pipeline', 'aroll', 'images'],
+    options=['total_package', 'broll_pipeline', 'aroll', 'images'],
     format_func=lambda x: {
+        'total_package': '📦 Total Package (A-Roll + B-Roll Pipeline)',
         'broll_pipeline': '🎬 B-Roll Pipeline (Images → Videos)',
         'aroll': '🎤 A-Roll Only (Talking Head Videos)',
         'images': '🖼️ Images Only'
@@ -227,49 +239,169 @@ mode = st.radio(
 # =============================================================================
 
 st.divider()
-st.subheader("2. Upload Prompts")
+st.subheader("2. Upload Prompts & References")
 
-col1, col2 = st.columns(2)
+# Initialize containers
+uploaded_files = {}
+reference_frames = {}
 
-with col1:
-    uploaded_file = st.file_uploader(
-        "Upload Prompts File",
-        type=['txt', 'csv'],
-        help="TXT: ID + Prompt blocks. CSV: columns 'id', 'prompt'"
-    )
+# Layout based on mode
+if mode == 'total_package':
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**1. A-Roll (Talking Head)**")
+        aroll_file = st.file_uploader("A-Roll Prompts (TXT/CSV)", key="aroll_file")
+        aroll_ref = st.file_uploader("A-Roll Reference (Face)", type=['jpg', 'png'], key="aroll_ref")
+        if aroll_ref: st.image(aroll_ref, width=150)
+        
+    with col2:
+        st.markdown("**2. B-Roll Images**")
+        broll_img_file = st.file_uploader("Image Prompts (TXT/CSV)", key="broll_img_file")
+        broll_ref = st.file_uploader("Character Reference (Style)", type=['jpg', 'png'], key="broll_ref")
+        if broll_ref: st.image(broll_ref, width=150)
+        
+    with col3:
+        st.markdown("**3. B-Roll Videos**")
+        broll_vid_file = st.file_uploader("Video Prompts (TXT/CSV)", key="broll_vid_file")
 
-with col2:
-    if mode == 'aroll':
-        reference_frame = st.file_uploader(
-            "Upload Talking Head Frame (Required)",
-            type=['jpg', 'jpeg', 'png', 'webp'],
-            help="Reference frame for A-Roll videos"
-        )
-        if reference_frame:
-            st.image(reference_frame, caption="Reference Frame", width=200)
-    else:
-        reference_frame = None
-
-if uploaded_file:
-    if st.button("📥 Load Prompts", type="secondary"):
-        try:
-            content = uploaded_file.getvalue().decode('utf-8')
-            ext = uploaded_file.name.split('.')[-1].lower()
-            
-            new_items = []
-            if ext == 'txt':
-                new_items = parse_txt_file(content)
-            elif ext == 'csv':
-                new_items = parse_csv_file(content)
-            
-            if new_items:
-                st.session_state.auto_batch_items = new_items
-                st.success(f"✅ Loaded {len(new_items)} prompts!")
+    if st.button("📥 Load All Files", type="secondary"):
+        if aroll_file and broll_img_file and broll_vid_file and aroll_ref and broll_ref:
+            try:
+                # Parse all files
+                aroll_items = parse_file(aroll_file)
+                img_items = parse_file(broll_img_file)
+                vid_items = parse_file(broll_vid_file)
+                
+                # Merge logic: Assumes order matches if IDs don't
+                # For Total Package, we create separate jobs or a unified structure?
+                # The engine runs one job. We can chain them or run A-Roll then B-Roll.
+                # Let's create a unified list but we need to know what is what.
+                # Actually, Total Package = A-Roll Job + B-Roll Job? 
+                # Or one massive job? The current engine handles one content type or one pipeline.
+                # Ideally, we run A-Roll first, then B-Roll.
+                
+                # Let's simple merge for now:
+                # We will queue A-Roll items + B-Roll Pipeline items.
+                # BUT the engine doesn't support mixed types in one go easily without modification.
+                # Solution: We will treat this as a "B-Roll Pipeline" job for the B-Roll part,
+                # and "A-Roll" job for the A-Roll part.
+                # For simplicity in this UI, let's merge them into a list where we distinguish them? 
+                # No, standardizing is better.
+                
+                # We will store them in session state as:
+                # st.session_state.auto_aroll_items
+                # st.session_state.auto_broll_items (merged img+vid)
+                
+                st.session_state.auto_aroll_items = aroll_items
+                st.session_state.auto_broll_items = merge_broll_items(img_items, vid_items)
+                
+                # Save references to temp
+                st.session_state.auto_ref_aroll = save_temp_file(aroll_ref)
+                st.session_state.auto_ref_broll = save_temp_file(broll_ref)
+                
+                st.success(f"✅ Loaded: {len(aroll_items)} A-Roll, {len(st.session_state.auto_broll_items)} B-Roll items")
                 st.rerun()
-            else:
-                st.error("No valid prompts found in file")
-        except Exception as e:
-            st.error(f"❌ Error parsing file: {str(e)}")
+            except Exception as e:
+                st.error(f"❌ Error parsing: {e}")
+        else:
+            st.error("⚠️ Please upload all 3 prompt files and 2 reference images")
+
+elif mode == 'broll_pipeline':
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**1. Image Generation**")
+        img_file = st.file_uploader("Image Prompts (TXT/CSV)", key="img_file")
+        ref_img = st.file_uploader("Character Reference (Style)", type=['jpg', 'png'], key="ref_img")
+        if ref_img: st.image(ref_img, width=150)
+        
+    with col2:
+        st.markdown("**2. Video Generation**")
+        vid_file = st.file_uploader("Video Prompts (TXT/CSV)", key="vid_file")
+        
+    if st.button("📥 Load Pipeline Files", type="secondary"):
+        if img_file and vid_file and ref_img:
+            try:
+                img_items = parse_file(img_file)
+                vid_items = parse_file(vid_file)
+                
+                merged = merge_broll_items(img_items, vid_items)
+                st.session_state.auto_batch_items = merged
+                
+                # Save ref
+                st.session_state.auto_ref_broll = save_temp_file(ref_img)
+                
+                st.success(f"✅ Loaded {len(merged)} pipeline items")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
+        else:
+            st.error("⚠️ Please upload Image Prompts, Video Prompts, and Character Reference")
+
+elif mode == 'aroll':
+    col1, col2 = st.columns(2)
+    with col1:
+        f = st.file_uploader("A-Roll Prompts (TXT/CSV)", key="aroll_only_file")
+    with col2:
+        ref = st.file_uploader("Talking Head Reference", type=['jpg', 'png'], key="aroll_only_ref")
+        if ref: st.image(ref, width=150)
+        
+    if f and ref and st.button("📥 Load A-Roll", type="secondary"):
+        try:
+            items = parse_file(f)
+            st.session_state.auto_batch_items = items
+            st.session_state.auto_ref_aroll = save_temp_file(ref)
+            st.success(f"✅ Loaded {len(items)} items")
+            st.rerun()
+        except Exception as e: st.error(str(e))
+
+else: # images
+    f = st.file_uploader("Image Prompts (TXT/CSV)", key="img_only_file")
+    if f and st.button("📥 Load Images", type="secondary"):
+        try:
+            items = parse_file(f)
+            st.session_state.auto_batch_items = items
+            st.success(f"✅ Loaded {len(items)} items")
+            st.rerun()
+        except Exception as e: st.error(str(e))
+
+def parse_file(uploaded_file):
+    content = uploaded_file.getvalue().decode('utf-8')
+    ext = uploaded_file.name.split('.')[-1].lower()
+    if ext == 'txt': return parse_txt_file(content)
+    elif ext == 'csv': return parse_csv_file(content)
+    return []
+
+def save_temp_file(uploaded_file):
+    if not uploaded_file: return None
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        tmp.write(uploaded_file.getvalue())
+        return tmp.name
+
+def merge_broll_items(img_items, vid_items):
+    # Merge logic: 1-to-1 matching by index if IDs don't match, or by ID if they do
+    merged = []
+    # Create map of vid items by ID
+    vid_map = {item['id']: item for item in vid_items}
+    
+    for idx, img_item in enumerate(img_items):
+        # Try finding video by ID, else use index
+        vid_item = vid_map.get(img_item['id'])
+        if not vid_item and idx < len(vid_items):
+            vid_item = vid_items[idx]
+        
+        if vid_item:
+            merged.append({
+                'id': img_item['id'],
+                'image_prompt': img_item['prompt'],
+                'video_prompt': vid_item['prompt'],
+                'prompt': vid_item['prompt'], # Default for compatibility
+                'number_of_images': img_item.get('number_of_images', 1),
+                'number_of_videos': vid_item.get('number_of_videos', 1),
+                '_ui_id': get_unique_id()
+            })
+    return merged
 
 
 # =============================================================================
@@ -356,21 +488,30 @@ if batch_items:
 # Generate Button & Progress
 # =============================================================================
 
-if batch_items and (mode != 'aroll' or reference_frame):
+if (mode == 'total_package' and st.session_state.auto_aroll_items and st.session_state.auto_broll_items) or \
+   (mode != 'total_package' and st.session_state.auto_batch_items):
+    
     st.divider()
     
     # Estimate
-    total_items = len(batch_items)
-    if mode == 'broll_pipeline':
-        st.info(f"📊 Will generate {total_items} images, then {total_items} videos")
-    elif mode == 'images':
-        st.info(f"📊 Will generate {total_items} images")
+    if mode == 'total_package':
+        n_aroll = len(st.session_state.auto_aroll_items)
+        n_broll = len(st.session_state.auto_broll_items)
+        st.info(f"📊 Will generate {n_aroll} A-Roll videos, then {n_broll} images & {n_broll} B-Roll videos")
     else:
-        st.info(f"📊 Will generate {total_items} videos")
+        total = len(st.session_state.auto_batch_items)
+        if mode == 'broll_pipeline':
+            st.info(f"📊 Will generate {total} images, then {total} videos")
+        elif mode == 'images':
+            st.info(f"📊 Will generate {total} images")
+        else:
+            st.info(f"📊 Will generate {total} videos")
     
     if st.button("🚀 Start Generation", type="primary", use_container_width=True):
         st.session_state.auto_is_running = True
         st.session_state.auto_log_messages = []
+        st.session_state.auto_results = None
+        st.session_state.auto_pipeline_results = None
         
         # Create containers
         progress_container = st.container()
@@ -379,15 +520,12 @@ if batch_items and (mode != 'aroll' or reference_frame):
         
         with progress_container:
             st.subheader("⏳ Processing...")
-            
-            # Progress elements
             progress_bar = st.progress(0)
             col1, col2, col3, col4 = st.columns(4)
             completed_metric = col1.empty()
             failed_metric = col2.empty()
             remaining_metric = col3.empty()
             elapsed_metric = col4.empty()
-            
             status_text = st.empty()
             log_display = st.empty()
         
@@ -399,15 +537,6 @@ if batch_items and (mode != 'aroll' or reference_frame):
                 debug_log_container = st.container()
                 logger = StreamlitLogger(debug_log_container)
         
-        # Save reference frame to temp file if provided
-        start_frame_path = None
-        if reference_frame:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                tmp.write(reference_frame.getvalue())
-                tmp.flush()
-                os.fsync(tmp.fileno())
-                start_frame_path = tmp.name
-        
         start_time = time.time()
         progress_state = {
             'completed_count': 0,
@@ -416,16 +545,22 @@ if batch_items and (mode != 'aroll' or reference_frame):
         }
         
         def update_ui():
-            total = len(batch_items)
-            done = progress_state['completed_count'] + progress_state['failed_count']
+            if mode == 'total_package':
+                total = len(st.session_state.auto_aroll_items) + (len(st.session_state.auto_broll_items) * 2) # approx steps
+            else:
+                total = len(st.session_state.auto_batch_items)
+                if mode == 'broll_pipeline': total *= 2 
             
-            progress_bar.progress(done / total if total > 0 else 0)
+            # Rough progress estimation
+            done = progress_state['completed_count'] + progress_state['failed_count']
+            pct = min(done / total if total > 0 else 0, 1.0)
+            
+            progress_bar.progress(pct)
             completed_metric.metric("✅ Completed", progress_state['completed_count'])
             failed_metric.metric("❌ Failed", progress_state['failed_count'])
             remaining_metric.metric("⏳ Remaining", total - done)
             elapsed_metric.metric("⏱️ Elapsed", f"{time.time() - start_time:.0f}s")
             
-            # Show recent logs
             if progress_state['log_messages']:
                 recent_logs = progress_state['log_messages'][-10:]
                 log_html = "<div class='progress-log'>" + "<br>".join(recent_logs) + "</div>"
@@ -444,11 +579,9 @@ if batch_items and (mode != 'aroll' or reference_frame):
                 status_text.info(f"📍 {data['name']}")
             elif event_type == 'batch_started':
                 status_text.info(f"Starting {data['content_type']} generation ({data['total']} items)")
-            
             update_ui()
         
         try:
-            # Initialize client
             client = VEOClient(
                 api_key=st.session_state.api_key,
                 base_url="https://genaipro.vn/api/v1",
@@ -456,162 +589,163 @@ if batch_items and (mode != 'aroll' or reference_frame):
                 logger=logger
             )
             
-            # Create job for persistence
-            job = create_job(mode, batch_items, {'aspect_ratio': aspect_ratio})
-            job.status = 'running'
-            save_job(job)
-            st.session_state.auto_current_job = job
-            
             async def run_generation():
-                if mode == 'broll_pipeline':
-                    engine = AutomationEngine(
-                        client=client,
-                        content_type='images',
-                        progress_callback=progress_callback,
-                        logger=logger
-                    )
-                    results = await engine.run_broll_pipeline(batch_items, aspect_ratio, job)
-                    return results, 'pipeline'
+                final_results = {}
+                pipeline_results = {}
                 
-                elif mode == 'images':
-                    engine = AutomationEngine(
-                        client=client,
-                        content_type='images',
-                        progress_callback=progress_callback,
-                        logger=logger
+                # TOTAL PACKAGE MODE
+                if mode == 'total_package':
+                    # 1. A-Roll
+                    status_text.info("🚀 Starting Phase 1: A-Roll Videos")
+                    aroll_job = create_job('aroll', st.session_state.auto_aroll_items, {'aspect_ratio': aspect_ratio})
+                    aroll_engine = AutomationEngine(client, 'videos', progress_callback, logger)
+                    
+                    aroll_results = await aroll_engine.generate_videos_batch(
+                        st.session_state.auto_aroll_items, 
+                        aspect_ratio, 
+                        st.session_state.auto_ref_aroll, 
+                        aroll_job
                     )
-                    results = await engine.generate_images_batch(batch_items, aspect_ratio, job)
-                    return results, 'images'
+                    final_results.update(aroll_results)
+                    
+                    # 2. B-Roll Pipeline
+                    status_text.info("🚀 Starting Phase 2: B-Roll Pipeline")
+                    
+                    # Inject reference frame
+                    broll_items = st.session_state.auto_broll_items
+                    for item in broll_items:
+                        item['image_reference_frame_path'] = st.session_state.auto_ref_broll
+                        
+                    broll_job = create_job('broll_pipeline', broll_items, {'aspect_ratio': aspect_ratio})
+                    broll_engine = AutomationEngine(client, 'images', progress_callback, logger) # content_type unused for pipeline
+                    
+                    p_results = await broll_engine.run_broll_pipeline(broll_items, aspect_ratio, broll_job)
+                    pipeline_results.update(p_results)
+                    
+                    return final_results, pipeline_results, 'total'
+
+                # B-ROLL PIPELINE MODE
+                elif mode == 'broll_pipeline':
+                    items = st.session_state.auto_batch_items
+                    for item in items:
+                        item['image_reference_frame_path'] = st.session_state.auto_ref_broll
+                        
+                    job = create_job('broll_pipeline', items, {'aspect_ratio': aspect_ratio})
+                    engine = AutomationEngine(client, 'images', progress_callback, logger)
+                    p_results = await engine.run_broll_pipeline(items, aspect_ratio, job)
+                    return {}, p_results, 'pipeline'
                 
-                else:  # aroll
-                    engine = AutomationEngine(
-                        client=client,
-                        content_type='videos',
-                        progress_callback=progress_callback,
-                        logger=logger
-                    )
-                    results = await engine.generate_videos_batch(
-                        batch_items, aspect_ratio, start_frame_path, job
-                    )
-                    return results, 'videos'
+                # OTHER MODES
+                else:
+                    items = st.session_state.auto_batch_items
+                    job = create_job(mode, items, {'aspect_ratio': aspect_ratio})
+                    
+                    if mode == 'images':
+                        engine = AutomationEngine(client, 'images', progress_callback, logger)
+                        res = await engine.generate_images_batch(items, aspect_ratio, job)
+                        return res, {}, 'images'
+                    else: # aroll only
+                        engine = AutomationEngine(client, 'videos', progress_callback, logger)
+                        res = await engine.generate_videos_batch(
+                            items, aspect_ratio, st.session_state.auto_ref_aroll, job
+                        )
+                        return res, {}, 'videos'
+
+            res, p_res, r_type = asyncio.run(run_generation())
             
-            results, result_type = asyncio.run(run_generation())
-            
-            if result_type == 'pipeline':
-                st.session_state.auto_pipeline_results = results
-            else:
-                st.session_state.auto_results = results
-            
-            # Mark job complete
-            job.status = 'completed'
-            save_job(job)
+            st.session_state.auto_results = res if res else None
+            st.session_state.auto_pipeline_results = p_res if p_res else None
             
             elapsed = time.time() - start_time
             st.success(f"✅ Generation completed in {elapsed:.0f}s!")
             
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
-            if logger:
-                logger.error(f"Error: {str(e)}")
-        
+            if logger: logger.error(f"Error: {str(e)}")
         finally:
             st.session_state.auto_is_running = False
-            
-            # Cleanup temp file
-            if start_frame_path and os.path.exists(start_frame_path):
-                try:
-                    os.unlink(start_frame_path)
-                except:
-                    pass
 
 
 # =============================================================================
 # Results Display
 # =============================================================================
 
-# Pipeline results
-if st.session_state.auto_pipeline_results:
-    results = st.session_state.auto_pipeline_results
-    
+if st.session_state.auto_results or st.session_state.auto_pipeline_results:
     st.divider()
-    st.subheader("🎬 Pipeline Results")
+    st.subheader("✅ Generation Results")
     
-    # Summary
-    completed_images = sum(1 for r in results.values() if r.get('image_status') == 'completed')
-    completed_videos = sum(1 for r in results.values() if r.get('video_status') == 'completed')
-    failed_count = sum(1 for r in results.values() if r.get('image_status') == 'failed' or r.get('video_status') == 'failed')
+    # helper for result metrics
+    def display_metrics(results_dict, label):
+        completed = sum(1 for r in results_dict.values() if (r.get('status') if isinstance(r, dict) else r.status) == 'completed')
+        failed = sum(1 for r in results_dict.values() if (r.get('status') if isinstance(r, dict) else r.status) == 'failed')
+        st.markdown(f"**{label}**: {completed} completed, {failed} failed")
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("🖼️ Images", completed_images)
-    col2.metric("🎥 Videos", completed_videos)
-    col3.metric("❌ Failed", failed_count)
-    
-    # Download CSV
-    csv_data = create_pipeline_csv(results)
-    st.download_button(
-        "📥 Download Results CSV",
-        csv_data,
-        "pipeline_results.csv",
-        "text/csv",
-        use_container_width=True
-    )
+    # 1. Pipeline Results (B-Roll)
+    if st.session_state.auto_pipeline_results:
+        st.markdown("### 🎬 B-Roll Pipeline Results")
+        p_res = st.session_state.auto_pipeline_results
+        
+        # Calculate metrics for pipeline (image & video)
+        img_completed = sum(1 for r in p_res.values() if (r.get('image_result', {}).get('status') if isinstance(r, dict) else r['image_result']['status']) == 'completed')
+        vid_completed = sum(1 for r in p_res.values() if (r.get('video_result', {}).get('status') if isinstance(r, dict) else r['video_result']['status']) == 'completed')
+        st.write(f"Images: {img_completed} completed. Videos: {vid_completed} completed.")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        # CSVs
+        csv_data = create_pipeline_csv(p_res)
+        col1.download_button("📥 Pipeline CSV", csv_data, "broll_pipeline_results.csv", "text/csv")
+        
+        # Zips (Images)
+        # Extract image results list
+        img_results_list = []
+        vid_results_list = []
+        for r in p_res.values():
+            if 'image_result' in r and r['image_result']: img_results_list.append(r['image_result'])
+            if 'video_result' in r and r['video_result']: vid_results_list.append(r['video_result'])
+            
+        img_zips = create_chunked_zips(img_results_list, prefix='broll_img', max_size_mb=200)
+        for name, data in img_zips:
+            col2.download_button(f"📦 {name}", data, name, "application/zip", key=f"dl_{name}")
+            
+        # Zips (Videos)
+        vid_zips = create_chunked_zips(vid_results_list, prefix='broll_vid', max_size_mb=200)
+        for name, data in vid_zips:
+            col3.download_button(f"📦 {name}", data, name, "application/zip", key=f"dl_{name}")
 
-# Regular results (images or videos)
-elif st.session_state.auto_results:
-    results = st.session_state.auto_results
-    
-    st.divider()
-    st.subheader("📦 Results")
-    
-    # Summary
-    completed_results = {k: v for k, v in results.items() if v.status == 'completed'}
-    failed_results = {k: v for k, v in results.items() if v.status == 'failed'}
-    
-    col1, col2 = st.columns(2)
-    col1.metric("✅ Completed", len(completed_results))
-    col2.metric("❌ Failed", len(failed_results))
-    
-    # Download section
-    if completed_results:
-        st.subheader("📥 Downloads")
+    if st.session_state.auto_results and st.session_state.auto_pipeline_results:
+        st.divider()
+
+    # 2. Standard Results (A-Roll or Single Mode)
+    if st.session_state.auto_results:
+        label = "A-Roll (Videos)" if mode == 'total_package' else ("Images" if mode == 'images' else "Videos")
+        st.markdown(f"### {label} Results")
         
-        # Create chunked ZIPs
-        prefix = '2_broll_img' if mode == 'images' else '3_broll_vid'
-        zip_parts = create_chunked_zips(results, prefix, MAX_ZIP_SIZE_MB)
+        res = st.session_state.auto_results
+        display_metrics(res, label)
         
-        if len(zip_parts) == 1:
-            filename, zip_data = zip_parts[0]
-            st.download_button(
-                f"📥 Download All ({len(completed_results)} items)",
-                zip_data,
-                filename,
-                "application/zip",
-                use_container_width=True
-            )
+        col1, col2, col3 = st.columns(3)
+        
+        # Success CSV
+        csv_data = create_results_csv(res)
+        prefix = "aroll" if mode == 'total_package' else mode
+        col1.download_button(f"📥 Results CSV", csv_data, f"{prefix}_results.csv", "text/csv")
+        
+        # Failed CSV (Retryable)
+        failed_csv = create_failed_csv(res)
+        if len(failed_csv.split('\n')) > 2:
+            col2.download_button("⚠️ Failed CSV (Retry)", failed_csv, f"{prefix}_failed.csv", "text/csv")
+        
+        # Zips
+        # Convert dict values to list for create_chunked_zips
+        results_list = list(res.values())
+        zips = create_chunked_zips(results_list, prefix=prefix, max_size_mb=200)
+        
+        if zips:
+            for name, data in zips:
+                col3.download_button(f"📦 {name}", data, name, "application/zip", key=f"dl_{name}")
         else:
-            st.info(f"📦 Split into {len(zip_parts)} parts (max {MAX_ZIP_SIZE_MB}MB each)")
-            cols = st.columns(len(zip_parts))
-            for idx, (filename, zip_data) in enumerate(zip_parts):
-                with cols[idx]:
-                    st.download_button(
-                        f"Part {idx+1}",
-                        zip_data,
-                        filename,
-                        "application/zip",
-                        key=f"zip_part_{idx}"
-                    )
-        
-        # CSV export
-        csv_data = create_results_csv(results)
-        st.download_button(
-            "📥 Download Results CSV",
-            csv_data,
-            "results.csv",
-            "text/csv"
-        )
-    
-    # Failed items section
-    if failed_results:
+            col3.info("No completed files to download")
         st.divider()
         st.subheader("❌ Failed Items")
         
