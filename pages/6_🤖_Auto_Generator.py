@@ -148,6 +148,46 @@ def parse_csv_file(file_contents: str) -> List[Dict]:
     return prompts
 
 
+def parse_file(uploaded_file):
+    content = uploaded_file.getvalue().decode('utf-8')
+    ext = uploaded_file.name.split('.')[-1].lower()
+    if ext == 'txt': return parse_txt_file(content)
+    elif ext == 'csv': return parse_csv_file(content)
+    return []
+
+
+def save_temp_file(uploaded_file):
+    if not uploaded_file: return None
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+        tmp.write(uploaded_file.getvalue())
+        return tmp.name
+
+
+def merge_broll_items(img_items, vid_items):
+    # Merge logic: 1-to-1 matching by index if IDs don't match, or by ID if they do
+    merged = []
+    # Create map of vid items by ID
+    vid_map = {item['id']: item for item in vid_items}
+    
+    for idx, img_item in enumerate(img_items):
+        # Try finding video by ID, else use index
+        vid_item = vid_map.get(img_item['id'])
+        if not vid_item and idx < len(vid_items):
+            vid_item = vid_items[idx]
+        
+        if vid_item:
+            merged.append({
+                'id': img_item['id'],
+                'image_prompt': img_item['prompt'],
+                'video_prompt': vid_item['prompt'],
+                'prompt': vid_item['prompt'], # Default for compatibility
+                'number_of_images': img_item.get('number_of_images', 1),
+                'number_of_videos': vid_item.get('number_of_videos', 1),
+                '_ui_id': get_unique_id()
+            })
+    return merged
+
+
 # =============================================================================
 # Session State Initialization
 # =============================================================================
@@ -377,42 +417,6 @@ else: # images
         else:
             st.error("⚠️ Please provide prompts (File/Text)")
 
-def parse_file(uploaded_file):
-    content = uploaded_file.getvalue().decode('utf-8')
-    ext = uploaded_file.name.split('.')[-1].lower()
-    if ext == 'txt': return parse_txt_file(content)
-    elif ext == 'csv': return parse_csv_file(content)
-    return []
-
-def save_temp_file(uploaded_file):
-    if not uploaded_file: return None
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmp:
-        tmp.write(uploaded_file.getvalue())
-        return tmp.name
-
-def merge_broll_items(img_items, vid_items):
-    # Merge logic: 1-to-1 matching by index if IDs don't match, or by ID if they do
-    merged = []
-    # Create map of vid items by ID
-    vid_map = {item['id']: item for item in vid_items}
-    
-    for idx, img_item in enumerate(img_items):
-        # Try finding video by ID, else use index
-        vid_item = vid_map.get(img_item['id'])
-        if not vid_item and idx < len(vid_items):
-            vid_item = vid_items[idx]
-        
-        if vid_item:
-            merged.append({
-                'id': img_item['id'],
-                'image_prompt': img_item['prompt'],
-                'video_prompt': vid_item['prompt'],
-                'prompt': vid_item['prompt'], # Default for compatibility
-                'number_of_images': img_item.get('number_of_images', 1),
-                'number_of_videos': vid_item.get('number_of_videos', 1),
-                '_ui_id': get_unique_id()
-            })
-    return merged
 
 
 # =============================================================================
