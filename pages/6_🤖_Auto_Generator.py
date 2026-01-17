@@ -839,8 +839,8 @@ if st.session_state.auto_results or st.session_state.auto_pipeline_results:
                 return 'unknown'
         
         # Calculate metrics for pipeline (image & video)
-        img_completed = sum(1 for r in p_res.values() if get_nested_status(r, 'image_result') == 'completed')
-        vid_completed = sum(1 for r in p_res.values() if get_nested_status(r, 'video_result') == 'completed')
+        img_completed = sum(1 for r in p_res.values() if r and get_nested_status(r, 'image_result') == 'completed')
+        vid_completed = sum(1 for r in p_res.values() if r and get_nested_status(r, 'video_result') == 'completed')
         st.write(f"Images: {img_completed} completed. Videos: {vid_completed} completed.")
         
         col1, col2, col3 = st.columns(3)

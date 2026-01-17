@@ -627,19 +627,36 @@ def create_pipeline_csv(pipeline_results: Dict[str, Dict]) -> str:
         'video_status', 'video_url', 'video_error'
     ])
     
+    def safe_get_url(obj):
+        """Safely extract first URL from urls list."""
+        try:
+            if isinstance(obj, dict):
+                urls = obj.get('urls') or obj.get('file_urls') or []
+                return urls[0] if urls else ''
+            elif hasattr(obj, 'urls') and obj.urls:
+                return obj.urls[0]
+            elif hasattr(obj, 'file_urls') and obj.file_urls:
+                return obj.file_urls[0]
+            return ''
+        except (IndexError, TypeError, AttributeError):
+            return ''
+    
     for pid, data in pipeline_results.items():
+        if not isinstance(data, dict):
+            continue
+            
         img = data.get('image_result') or {}
         vid = data.get('video_result') or {}
         
         # extract safely
-        i_stat = img.get('status') if isinstance(img, dict) else getattr(img, 'status', '')
-        i_url = (img.get('urls') or [])[0] if isinstance(img, dict) else (img.urls[0] if getattr(img, 'urls', None) else '')
-        i_err = img.get('error') if isinstance(img, dict) else getattr(img, 'error', '')
+        i_stat = img.get('status', '') if isinstance(img, dict) else getattr(img, 'status', '')
+        i_url = safe_get_url(img)
+        i_err = img.get('error', '') if isinstance(img, dict) else getattr(img, 'error', '')
         
-        v_stat = vid.get('status') if isinstance(vid, dict) else getattr(vid, 'status', '')
-        v_url = (vid.get('urls') or [])[0] if isinstance(vid, dict) else (vid.urls[0] if getattr(vid, 'urls', None) else '')
-        v_err = vid.get('error') if isinstance(vid, dict) else getattr(vid, 'error', '')
+        v_stat = vid.get('status', '') if isinstance(vid, dict) else getattr(vid, 'status', '')
+        v_url = safe_get_url(vid)
+        v_err = vid.get('error', '') if isinstance(vid, dict) else getattr(vid, 'error', '')
         
-        writer.writerow([pid, i_stat, i_url, i_err, v_stat, v_url, v_err])
+        writer.writerow([pid, i_stat or '', i_url or '', i_err or '', v_stat or '', v_url or '', v_err or ''])
         
     return output.getvalue()
