@@ -31,28 +31,33 @@ class RetryConfig:
         return delay
 
 
-# Predefined retry strategies
+# Predefined retry strategies - Extended delays: 5s → 15s → 30s → 60s → 120s → 180s → 300s
+EXTENDED_DELAYS = [5, 15, 30, 60, 120, 180, 300]  # 7 retries over ~11 minutes total
+
 RETRY_STRATEGIES = {
     'recaptcha': RetryConfig(
-        max_retries=5,
+        max_retries=7,
         base_delay=5.0,
-        backoff_factor=3.0,
-        custom_delays=[5, 15, 30, 45, 60]  # Custom progression: 5s → 15s → 30s → 45s → 60s
+        backoff_factor=2.0,
+        custom_delays=EXTENDED_DELAYS
     ),
     'server_error': RetryConfig(
-        max_retries=3,
-        base_delay=2.0,
-        backoff_factor=2.0  # Exponential: 2s → 4s → 8s
+        max_retries=7,
+        base_delay=5.0,
+        backoff_factor=2.0,
+        custom_delays=EXTENDED_DELAYS
     ),
     'connection_error': RetryConfig(
-        max_retries=4,
-        base_delay=3.0,
-        backoff_factor=2.0  # Exponential: 3s → 6s → 12s → 24s
+        max_retries=7,
+        base_delay=5.0,
+        backoff_factor=2.0,
+        custom_delays=EXTENDED_DELAYS
     ),
     'default': RetryConfig(
-        max_retries=2,
-        base_delay=1.0,
-        backoff_factor=2.0  # Exponential: 1s → 2s
+        max_retries=7,
+        base_delay=5.0,
+        backoff_factor=2.0,
+        custom_delays=EXTENDED_DELAYS
     )
 }
 

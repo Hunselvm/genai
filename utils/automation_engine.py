@@ -21,6 +21,7 @@ import httpx
 from utils.veo_client import VEOClient
 from utils.sse_handler import parse_sse_stream
 from utils.progress_persistence import AutomationJob, save_job
+from utils.retry_handler import RetryHandler
 
 
 # =============================================================================
@@ -325,7 +326,8 @@ class AutomationEngine:
             
             self._emit_progress('item_started', {'id': item.id, 'prompt': item.prompt})
             
-            try:
+            async def do_generate():
+                """Core generation logic - wrapped with retry."""
                 result = None
                 try:
                     async with self.client.create_image_stream(
@@ -344,7 +346,27 @@ class AutomationEngine:
                 if not result:
                     result = await self._poll_with_backoff(item, self._check_history_for_item)
                 
-                if not result: raise Exception("No result received")
+                if not result: 
+                    raise Exception("No result received")
+                
+                return result
+            
+            # Retry callback for progress updates
+            def on_retry(retry_count: int, delay: float, error_msg: str):
+                self._emit_progress('item_retrying', {
+                    'id': item.id, 
+                    'retry': retry_count, 
+                    'delay': delay,
+                    'error': error_msg[:50]
+                })
+                self._log('info', f"Retry {retry_count} for {item.id} after {delay:.0f}s: {error_msg[:50]}")
+            
+            try:
+                result = await RetryHandler.retry_with_backoff(
+                    do_generate,
+                    logger=self.logger,
+                    on_retry=on_retry
+                )
                 
                 urls = result.get('file_urls', []) or [result.get('file_url')]
                 file_paths = await self._download_content(urls)
@@ -367,7 +389,8 @@ class AutomationEngine:
             self._emit_progress('item_started', {'id': item.id, 'prompt': item.prompt})
             frame_path = item.reference_frame_path or start_frame_path
             
-            try:
+            async def do_generate():
+                """Core generation logic - wrapped with retry."""
                 result = None
                 try:
                     if frame_path:
@@ -388,7 +411,27 @@ class AutomationEngine:
                 if not result:
                     result = await self._poll_with_backoff(item, self._check_history_for_item)
                 
-                if not result: raise Exception("No result received")
+                if not result: 
+                    raise Exception("No result received")
+                
+                return result
+            
+            # Retry callback for progress updates
+            def on_retry(retry_count: int, delay: float, error_msg: str):
+                self._emit_progress('item_retrying', {
+                    'id': item.id, 
+                    'retry': retry_count, 
+                    'delay': delay,
+                    'error': error_msg[:50]
+                })
+                self._log('info', f"Retry {retry_count} for {item.id} after {delay:.0f}s: {error_msg[:50]}")
+            
+            try:
+                result = await RetryHandler.retry_with_backoff(
+                    do_generate,
+                    logger=self.logger,
+                    on_retry=on_retry
+                )
                 
                 urls = result.get('file_urls', []) or [result.get('file_url')]
                 file_paths = await self._download_content(urls)
