@@ -825,9 +825,22 @@ if st.session_state.auto_results or st.session_state.auto_pipeline_results:
         st.markdown("### 🎬 B-Roll Pipeline Results")
         p_res = st.session_state.auto_pipeline_results
         
+        # Helper to safely get nested status
+        def get_nested_status(r, key):
+            try:
+                if isinstance(r, dict):
+                    nested = r.get(key, {})
+                    if isinstance(nested, dict):
+                        return nested.get('status', 'unknown')
+                    elif hasattr(nested, 'status'):
+                        return nested.status
+                return 'unknown'
+            except:
+                return 'unknown'
+        
         # Calculate metrics for pipeline (image & video)
-        img_completed = sum(1 for r in p_res.values() if (r.get('image_result', {}).get('status') if isinstance(r, dict) else r['image_result']['status']) == 'completed')
-        vid_completed = sum(1 for r in p_res.values() if (r.get('video_result', {}).get('status') if isinstance(r, dict) else r['video_result']['status']) == 'completed')
+        img_completed = sum(1 for r in p_res.values() if get_nested_status(r, 'image_result') == 'completed')
+        vid_completed = sum(1 for r in p_res.values() if get_nested_status(r, 'video_result') == 'completed')
         st.write(f"Images: {img_completed} completed. Videos: {vid_completed} completed.")
         
         col1, col2, col3 = st.columns(3)
@@ -841,8 +854,11 @@ if st.session_state.auto_results or st.session_state.auto_pipeline_results:
         img_results_list = []
         vid_results_list = []
         for r in p_res.values():
-            if 'image_result' in r and r['image_result']: img_results_list.append(r['image_result'])
-            if 'video_result' in r and r['video_result']: vid_results_list.append(r['video_result'])
+            if isinstance(r, dict):
+                if r.get('image_result'): 
+                    img_results_list.append(r['image_result'])
+                if r.get('video_result'): 
+                    vid_results_list.append(r['video_result'])
             
         img_zips = create_chunked_zips(img_results_list, prefix='broll_img', max_size_mb=200)
         for name, data in img_zips:
