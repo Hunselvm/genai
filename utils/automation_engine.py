@@ -47,6 +47,25 @@ RETRY_CONFIG = {
 MAX_ZIP_SIZE_MB = 200
 
 
+def video_to_image_aspect_ratio(video_ar: str) -> str:
+    """Convert VIDEO_ASPECT_RATIO_* to IMAGE_ASPECT_RATIO_*."""
+    mapping = {
+        'VIDEO_ASPECT_RATIO_LANDSCAPE': 'IMAGE_ASPECT_RATIO_LANDSCAPE',
+        'VIDEO_ASPECT_RATIO_PORTRAIT': 'IMAGE_ASPECT_RATIO_PORTRAIT',
+    }
+    return mapping.get(video_ar, 'IMAGE_ASPECT_RATIO_LANDSCAPE')
+
+
+def image_to_video_aspect_ratio(image_ar: str) -> str:
+    """Convert IMAGE_ASPECT_RATIO_* to VIDEO_ASPECT_RATIO_*."""
+    mapping = {
+        'IMAGE_ASPECT_RATIO_LANDSCAPE': 'VIDEO_ASPECT_RATIO_LANDSCAPE',
+        'IMAGE_ASPECT_RATIO_PORTRAIT': 'VIDEO_ASPECT_RATIO_PORTRAIT',
+        'IMAGE_ASPECT_RATIO_SQUARE': 'VIDEO_ASPECT_RATIO_LANDSCAPE',  # Fallback
+    }
+    return mapping.get(image_ar, 'VIDEO_ASPECT_RATIO_LANDSCAPE')
+
+
 # =============================================================================
 # Error Categorization
 # =============================================================================
@@ -451,10 +470,11 @@ class AutomationEngine:
                     'reference_frame_path': item.get('image_reference_frame_path')
                 })
         
-        # Run Image Gen
+        # Run Image Gen with CONVERTED aspect ratio
         if image_work_items:
+            img_aspect_ratio = video_to_image_aspect_ratio(aspect_ratio)
             img_engine = AutomationEngine(self.client, 'images', self.progress_callback, self.logger)
-            await img_engine.generate_images_batch(image_work_items, aspect_ratio, job)
+            await img_engine.generate_images_batch(image_work_items, img_aspect_ratio, job)
         
         # Refresh results from job (to get what we just generated + what was cached)
         current_results = job.results if job else {}

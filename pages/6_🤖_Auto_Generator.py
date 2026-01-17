@@ -221,6 +221,9 @@ if 'auto_ref_aroll' not in st.session_state:
 if 'auto_ref_broll' not in st.session_state:
     st.session_state.auto_ref_broll = None
 
+if 'auto_stop_requested' not in st.session_state:
+    st.session_state.auto_stop_requested = False
+
 
 # =============================================================================
 # Resume Previous Jobs Section
@@ -620,12 +623,14 @@ if (mode == 'total_package' and st.session_state.auto_aroll_items and st.session
     
     if st.button("🚀 Start Generation", type="primary", use_container_width=True):
         st.session_state.auto_is_running = True
+        st.session_state.auto_stop_requested = False
         st.session_state.auto_log_messages = []
         st.session_state.auto_results = None
         st.session_state.auto_pipeline_results = None
         
         # Create containers
         progress_container = st.container()
+        stop_container = st.container()
         log_container = st.container()
         debug_container = st.container() if debug_mode else None
         
@@ -639,6 +644,16 @@ if (mode == 'total_package' and st.session_state.auto_aroll_items and st.session
             elapsed_metric = col4.empty()
             status_text = st.empty()
             log_display = st.empty()
+        
+        # Stop button (will be checked in callbacks)
+        with stop_container:
+            stop_col1, stop_col2 = st.columns([1, 3])
+            with stop_col1:
+                if st.button("🛑 Stop Generation", type="secondary", use_container_width=True):
+                    st.session_state.auto_stop_requested = True
+                    st.warning("⚠️ Stop requested. Saving completed files...")
+            with stop_col2:
+                st.caption("Stopping will save all completed files. You can download them after stopping.")
         
         # Setup logger
         logger = None
@@ -768,13 +783,27 @@ if (mode == 'total_package' and st.session_state.auto_aroll_items and st.session
             st.session_state.auto_pipeline_results = p_res if p_res else None
             
             elapsed = time.time() - start_time
-            st.success(f"✅ Generation completed in {elapsed:.0f}s!")
+            
+            if st.session_state.auto_stop_requested:
+                st.warning(f"⏹️ Generation stopped after {elapsed:.0f}s. Partial results saved ({progress_state['completed_count']} completed).")
+            else:
+                st.success(f"✅ Generation completed in {elapsed:.0f}s!")
             
         except Exception as e:
+            # Save partial results even on error
+            if 'res' in dir() and res:
+                st.session_state.auto_results = res
+            if 'p_res' in dir() and p_res:
+                st.session_state.auto_pipeline_results = p_res
+            
             st.error(f"❌ Error: {str(e)}")
             if logger: logger.error(f"Error: {str(e)}")
+            
+            if progress_state['completed_count'] > 0:
+                st.info(f"ℹ️ {progress_state['completed_count']} items were completed before the error. Check Results section below.")
         finally:
             st.session_state.auto_is_running = False
+            st.session_state.auto_stop_requested = False
 
 
 # =============================================================================
