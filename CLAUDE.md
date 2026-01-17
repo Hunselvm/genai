@@ -93,6 +93,29 @@ Both interfaces share common utilities in the `utils/` directory.
   - `3_🎬_A-ROLL_Footage.py` - Parallel A-roll video generation (single frame + multiple prompts)
   - `4_📦_B-ROLL_Images.py` - Batch image generation with prompts
   - `5_🎥_B-ROLL_Footage.py` - Parallel B-roll video generation (multiple frames matched to prompts)
+  - `6_🤖_Auto_Generator.py` - Automated pipeline for 90+ items (images → videos chaining)
+
+**Auto Generator (`pages/6_🤖_Auto_Generator.py`)**
+- Three modes: B-Roll Pipeline (images→videos), A-Roll Only, Images Only
+- Survives browser crashes via file-based persistence (`data/automation_progress/`)
+- Rate limiting (30 images/min, 20 videos/min) and concurrency control (max 3-5 concurrent)
+- Exponential backoff polling (5s → 45s) with 10min image / 20min video timeouts
+- Error categorization (PERMANENT vs RETRYABLE) for smart retry logic
+- Chunked ZIP downloads (200MB max per file) for large batches
+- Input validation (reject empty/short/long prompts)
+
+**Automation Engine (`utils/automation_engine.py`)**
+- Streamlit-free core processing logic for testability
+- `RateLimiter` class with per-minute request limits
+- `ErrorCategory` enum and `categorize_error()` for smart retries
+- `AutomationEngine` class with parallel batch generation
+- `create_chunked_zips()` for memory-efficient downloads
+- CSV export functions for results and failed prompts
+
+**Progress Persistence (`utils/progress_persistence.py`)**
+- `AutomationJob` dataclass for job state
+- `save_job()` / `load_job()` for file-based persistence
+- `list_resumable_jobs()` for resume functionality
 
 **Shared Sidebar (`utils/sidebar.py`)**
 - Standard component rendered across all Streamlit pages

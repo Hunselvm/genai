@@ -28,6 +28,7 @@ uploads/*
 
 # Data
 data/*.db
+data/automation_progress/
 
 # Environment
 .env
