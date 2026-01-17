@@ -420,14 +420,14 @@ else: # images
 
 
 # =============================================================================
-# Prompts Preview & Validation
+# Prompts Preview & Validation (Editable)
 # =============================================================================
 
 batch_items = st.session_state.auto_batch_items
 
 if batch_items:
     st.divider()
-    st.subheader(f"3. Review Prompts ({len(batch_items)} items)")
+    st.subheader(f"3. Edit Prompts ({len(batch_items)} items)")
     
     # Validation
     valid_items, validation_errors = validate_prompts(batch_items)
@@ -443,20 +443,116 @@ if batch_items:
             batch_items = valid_items
             st.rerun()
     
-    # Preview
-    with st.expander("View All Prompts", expanded=False):
-        for idx, item in enumerate(batch_items[:20]):  # Show first 20
-            st.text(f"{item['id']}: {item['prompt'][:100]}...")
-        if len(batch_items) > 20:
-            st.caption(f"... and {len(batch_items) - 20} more")
-    
-    col1, col2 = st.columns(2)
-    with col1:
+    # Action buttons row
+    col_add, col_clear, _ = st.columns([1, 1, 2])
+    with col_add:
+        if st.button("➕ Add New Prompt"):
+            st.session_state.auto_batch_items.append({
+                'id': f"new_{len(batch_items)+1}",
+                'prompt': '',
+                'number_of_images': 1,
+                'number_of_videos': 1,
+                '_ui_id': get_unique_id()
+            })
+            st.rerun()
+    with col_clear:
         if st.button("🗑️ Clear All"):
             st.session_state.auto_batch_items = []
             st.session_state.auto_results = None
             st.session_state.auto_pipeline_results = None
             st.rerun()
+    
+    # Editable prompts list
+    items_to_remove = []
+    
+    with st.expander("✏️ Edit Prompts", expanded=True):
+        for idx, item in enumerate(batch_items):
+            ui_key = item.get('_ui_id', f"fallback_{idx}")
+            
+            col1, col2, col3, col4 = st.columns([1.5, 0.5, 0.5, 0.3])
+            
+            with col1:
+                # ID input
+                new_id = st.text_input(
+                    "ID",
+                    value=item.get('id', f"item_{idx}"),
+                    key=f"auto_id_{ui_key}",
+                    label_visibility="collapsed",
+                    placeholder="ID"
+                )
+                st.session_state.auto_batch_items[idx]['id'] = new_id
+            
+            with col2:
+                # Image count (for images/broll_pipeline modes)
+                new_img_count = st.number_input(
+                    "Imgs",
+                    min_value=1,
+                    max_value=4,
+                    value=item.get('number_of_images', 1),
+                    key=f"auto_img_{ui_key}",
+                    label_visibility="collapsed",
+                    help="# of images"
+                )
+                st.session_state.auto_batch_items[idx]['number_of_images'] = new_img_count
+            
+            with col3:
+                # Video count (for video modes)
+                new_vid_count = st.number_input(
+                    "Vids",
+                    min_value=1,
+                    max_value=4,
+                    value=item.get('number_of_videos', 1),
+                    key=f"auto_vid_{ui_key}",
+                    label_visibility="collapsed",
+                    help="# of videos"
+                )
+                st.session_state.auto_batch_items[idx]['number_of_videos'] = new_vid_count
+            
+            with col4:
+                # Remove button
+                if st.button("🗑️", key=f"auto_del_{ui_key}", help="Remove"):
+                    items_to_remove.append(idx)
+            
+            # Prompt text (full width below)
+            new_prompt = st.text_area(
+                "Prompt",
+                value=item.get('prompt', ''),
+                key=f"auto_prm_{ui_key}",
+                height=80,
+                label_visibility="collapsed",
+                placeholder="Enter prompt here..."
+            )
+            st.session_state.auto_batch_items[idx]['prompt'] = new_prompt
+            
+            # Check for pipeline-specific fields
+            if 'image_prompt' in item or 'video_prompt' in item:
+                c1, c2 = st.columns(2)
+                with c1:
+                    img_prm = st.text_area(
+                        "Image Prompt",
+                        value=item.get('image_prompt', ''),
+                        key=f"auto_imgprm_{ui_key}",
+                        height=60,
+                        placeholder="Image generation prompt..."
+                    )
+                    st.session_state.auto_batch_items[idx]['image_prompt'] = img_prm
+                with c2:
+                    vid_prm = st.text_area(
+                        "Video Prompt", 
+                        value=item.get('video_prompt', ''),
+                        key=f"auto_vidprm_{ui_key}",
+                        height=60,
+                        placeholder="Video motion prompt..."
+                    )
+                    st.session_state.auto_batch_items[idx]['video_prompt'] = vid_prm
+            
+            st.divider()
+    
+    # Process removals
+    if items_to_remove:
+        for idx in sorted(items_to_remove, reverse=True):
+            st.session_state.auto_batch_items.pop(idx)
+        st.rerun()
 
 
 # =============================================================================
