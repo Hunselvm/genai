@@ -859,12 +859,22 @@ if st.session_state.auto_results or st.session_state.auto_pipeline_results:
                     img_results_list.append(r['image_result'])
                 if r.get('video_result'): 
                     vid_results_list.append(r['video_result'])
-        
         # Debug: Show what we found
         if debug_mode:
             st.write(f"Debug: Found {len(img_results_list)} image results, {len(vid_results_list)} video results")
             for idx, vr in enumerate(vid_results_list[:3]):  # Show first 3
-                st.write(f"Video {idx}: status={vr.get('status') if isinstance(vr, dict) else 'N/A'}, file_paths={vr.get('file_paths') if isinstance(vr, dict) else 'N/A'}")
+                st.write(f"--- Video Result {idx} ---")
+                st.write(f"Type: {type(vr)}")
+                if isinstance(vr, dict):
+                    st.write(f"Status: '{vr.get('status')}'")
+                    st.write(f"Keys: {list(vr.keys())}")
+                    st.write(f"File Paths: {vr.get('file_paths')}")
+                    st.write(f"Error: {vr.get('error')}")
+                else:
+                    st.write(f"Status: '{getattr(vr, 'status', 'N/A')}'")
+                    st.write(f"File Paths: {getattr(vr, 'file_paths', 'N/A')}")
+                    st.write(f"Error: {getattr(vr, 'error', 'N/A')}")
+                st.write("------------------------")
             
         img_zips = create_chunked_zips(img_results_list, prefix='broll_img', max_size_mb=200)
         for name, data in img_zips:
