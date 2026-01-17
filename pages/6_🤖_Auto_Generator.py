@@ -252,46 +252,39 @@ if mode == 'total_package':
     with col1:
         st.markdown("**1. A-Roll (Talking Head)**")
         aroll_file = st.file_uploader("A-Roll Prompts (TXT/CSV)", key="aroll_file")
+        aroll_text = st.text_area("Or Paste A-Roll (TXT)", height=150, placeholder="ID\nPrompt...", key="aroll_text")
         aroll_ref = st.file_uploader("A-Roll Reference (Face)", type=['jpg', 'png'], key="aroll_ref")
         if aroll_ref: st.image(aroll_ref, width=150)
         
     with col2:
         st.markdown("**2. B-Roll Images**")
         broll_img_file = st.file_uploader("Image Prompts (TXT/CSV)", key="broll_img_file")
+        broll_img_text = st.text_area("Or Paste Image Prompts (TXT)", height=150, placeholder="ID\nPrompt...", key="broll_img_text")
         broll_ref = st.file_uploader("Character Reference (Style)", type=['jpg', 'png'], key="broll_ref")
         if broll_ref: st.image(broll_ref, width=150)
         
     with col3:
         st.markdown("**3. B-Roll Videos**")
         broll_vid_file = st.file_uploader("Video Prompts (TXT/CSV)", key="broll_vid_file")
+        broll_vid_text = st.text_area("Or Paste Video Prompts (TXT)", height=150, placeholder="ID\nPrompt...", key="broll_vid_text")
 
     if st.button("📥 Load All Files", type="secondary"):
-        if aroll_file and broll_img_file and broll_vid_file and aroll_ref and broll_ref:
+        # Check inputs (File OR Text must be present for each)
+        has_aroll = aroll_file or aroll_text.strip()
+        has_img = broll_img_file or broll_img_text.strip()
+        has_vid = broll_vid_file or broll_vid_text.strip()
+        
+        if has_aroll and has_img and has_vid and aroll_ref and broll_ref:
             try:
-                # Parse all files
-                aroll_items = parse_file(aroll_file)
-                img_items = parse_file(broll_img_file)
-                vid_items = parse_file(broll_vid_file)
+                # Helper to get content from File OR Text
+                def get_content(f, t):
+                    if f: return parse_file(f)
+                    return parse_txt_file(t)
                 
-                # Merge logic: Assumes order matches if IDs don't
-                # For Total Package, we create separate jobs or a unified structure?
-                # The engine runs one job. We can chain them or run A-Roll then B-Roll.
-                # Let's create a unified list but we need to know what is what.
-                # Actually, Total Package = A-Roll Job + B-Roll Job? 
-                # Or one massive job? The current engine handles one content type or one pipeline.
-                # Ideally, we run A-Roll first, then B-Roll.
-                
-                # Let's simple merge for now:
-                # We will queue A-Roll items + B-Roll Pipeline items.
-                # BUT the engine doesn't support mixed types in one go easily without modification.
-                # Solution: We will treat this as a "B-Roll Pipeline" job for the B-Roll part,
-                # and "A-Roll" job for the A-Roll part.
-                # For simplicity in this UI, let's merge them into a list where we distinguish them? 
-                # No, standardizing is better.
-                
-                # We will store them in session state as:
-                # st.session_state.auto_aroll_items
-                # st.session_state.auto_broll_items (merged img+vid)
+                # Parse all inputs
+                aroll_items = get_content(aroll_file, aroll_text)
+                img_items = get_content(broll_img_file, broll_img_text)
+                vid_items = get_content(broll_vid_file, broll_vid_text)
                 
                 st.session_state.auto_aroll_items = aroll_items
                 st.session_state.auto_broll_items = merge_broll_items(img_items, vid_items)
@@ -305,7 +298,7 @@ if mode == 'total_package':
             except Exception as e:
                 st.error(f"❌ Error parsing: {e}")
         else:
-            st.error("⚠️ Please upload all 3 prompt files and 2 reference images")
+            st.error("⚠️ Please provide prompts (File/Text) for all 3 sections and upload 2 reference images")
 
 elif mode == 'broll_pipeline':
     col1, col2 = st.columns(2)
@@ -313,18 +306,27 @@ elif mode == 'broll_pipeline':
     with col1:
         st.markdown("**1. Image Generation**")
         img_file = st.file_uploader("Image Prompts (TXT/CSV)", key="img_file")
+        img_text = st.text_area("Or Paste Image Prompts (TXT)", height=150, placeholder="ID\nPrompt...", key="img_text")
         ref_img = st.file_uploader("Character Reference (Style)", type=['jpg', 'png'], key="ref_img")
         if ref_img: st.image(ref_img, width=150)
         
     with col2:
         st.markdown("**2. Video Generation**")
         vid_file = st.file_uploader("Video Prompts (TXT/CSV)", key="vid_file")
+        vid_text = st.text_area("Or Paste Video Prompts (TXT)", height=150, placeholder="ID\nPrompt...", key="vid_text")
         
     if st.button("📥 Load Pipeline Files", type="secondary"):
-        if img_file and vid_file and ref_img:
+        has_img = img_file or img_text.strip()
+        has_vid = vid_file or vid_text.strip()
+        
+        if has_img and has_vid and ref_img:
             try:
-                img_items = parse_file(img_file)
-                vid_items = parse_file(vid_file)
+                def get_content(f, t):
+                    if f: return parse_file(f)
+                    return parse_txt_file(t)
+
+                img_items = get_content(img_file, img_text)
+                vid_items = get_content(vid_file, vid_text)
                 
                 merged = merge_broll_items(img_items, vid_items)
                 st.session_state.auto_batch_items = merged
@@ -337,34 +339,43 @@ elif mode == 'broll_pipeline':
             except Exception as e:
                 st.error(f"❌ Error: {e}")
         else:
-            st.error("⚠️ Please upload Image Prompts, Video Prompts, and Character Reference")
+            st.error("⚠️ Please provide prompts (File/Text) and Character Reference")
 
 elif mode == 'aroll':
     col1, col2 = st.columns(2)
     with col1:
         f = st.file_uploader("A-Roll Prompts (TXT/CSV)", key="aroll_only_file")
+        t = st.text_area("Or Paste Prompts (TXT)", height=150, placeholder="ID\nPrompt...", key="aroll_only_text")
     with col2:
         ref = st.file_uploader("Talking Head Reference", type=['jpg', 'png'], key="aroll_only_ref")
         if ref: st.image(ref, width=150)
         
-    if f and ref and st.button("📥 Load A-Roll", type="secondary"):
-        try:
-            items = parse_file(f)
-            st.session_state.auto_batch_items = items
-            st.session_state.auto_ref_aroll = save_temp_file(ref)
-            st.success(f"✅ Loaded {len(items)} items")
-            st.rerun()
-        except Exception as e: st.error(str(e))
+    if st.button("📥 Load A-Roll", type="secondary"):
+        if (f or t.strip()) and ref:
+            try:
+                items = parse_file(f) if f else parse_txt_file(t)
+                st.session_state.auto_batch_items = items
+                st.session_state.auto_ref_aroll = save_temp_file(ref)
+                st.success(f"✅ Loaded {len(items)} items")
+                st.rerun()
+            except Exception as e: st.error(str(e))
+        else:
+            st.error("⚠️ Please provide prompts (File/Text) and Reference Image")
 
 else: # images
     f = st.file_uploader("Image Prompts (TXT/CSV)", key="img_only_file")
-    if f and st.button("📥 Load Images", type="secondary"):
-        try:
-            items = parse_file(f)
-            st.session_state.auto_batch_items = items
-            st.success(f"✅ Loaded {len(items)} items")
-            st.rerun()
-        except Exception as e: st.error(str(e))
+    t = st.text_area("Or Paste Prompts (TXT)", height=150, placeholder="ID\nPrompt...", key="img_only_text")
+    
+    if st.button("📥 Load Images", type="secondary"):
+        if f or t.strip():
+            try:
+                items = parse_file(f) if f else parse_txt_file(t)
+                st.session_state.auto_batch_items = items
+                st.success(f"✅ Loaded {len(items)} items")
+                st.rerun()
+            except Exception as e: st.error(str(e))
+        else:
+            st.error("⚠️ Please provide prompts (File/Text)")
 
 def parse_file(uploaded_file):
     content = uploaded_file.getvalue().decode('utf-8')

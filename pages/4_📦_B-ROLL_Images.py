@@ -231,29 +231,45 @@ class BatchImageGenerator:
                                 if self.logger:
                                     self.logger.error(f"Failed to fetch from history: {str(e)}")
 
-                        # Fetch image bytes for reliable downloading/renaming
-                        image_bytes_list = []
+                        # Download image to TEMP DISK (Optimization for RAM)
+                        file_paths = []
                         file_urls = event_data.get('file_urls', [])
                         if not file_urls and event_data.get('file_url'):
                             file_urls = [event_data.get('file_url')]
 
                         if file_urls:
                             try:
+                                temp_dir = st.session_state.get('temp_dir')
+                                if not temp_dir or not os.path.exists(temp_dir):
+                                    # Create specific temp dir for this batch if missing
+                                    temp_dir = tempfile.mkdtemp(prefix="broll_img_batch_")
+                                    st.session_state.temp_dir = temp_dir
+                                
                                 async with httpx.AsyncClient() as client:
-                                    for url in file_urls:
-                                        resp = await client.get(url, timeout=30.0)
-                                        if resp.status_code == 200:
-                                            image_bytes_list.append(resp.content)
+                                    for idx, url in enumerate(file_urls):
+                                        # Use stream to download without loading into RAM
+                                        safe_p_id = "".join(c if c.isalnum() else '_' for c in prompt_id)[:20]
+                                        fname = f"{safe_p_id}_{idx}.png"
+                                        fpath = os.path.join(temp_dir, fname)
+                                        
+                                        async with client.stream('GET', url) as resp:
+                                            resp.raise_for_status()
+                                            with open(fpath, 'wb') as f:
+                                                async for chunk in resp.aiter_bytes():
+                                                    f.write(chunk)
+                                        file_paths.append(fpath)
+
                             except Exception as dl_err:
                                 if self.logger:
-                                    self.logger.error(f"Failed to download image bytes: {str(dl_err)}")
+                                    self.logger.error(f"Failed to download image: {str(dl_err)}")
 
                         self.results[prompt_id] = {
                             'status': 'completed',
                             'data': event_data,
                             'prompt': prompt,
                             'number_of_images': number_of_images,
-                            'image_bytes_list': image_bytes_list
+                            'file_paths': file_paths, # Store path instead of bytes
+                            'file_urls': file_urls
                         }
                         return event_data
 
@@ -717,29 +733,75 @@ if st.session_state.image_results:
         st.divider()
         st.subheader("📦 Bulk Download")
 
-        # Prepare ZIP file
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for prompt_id, result_data in results.items():
-                if result_data['status'] == 'completed':
-                    image_bytes_list = result_data.get('image_bytes_list', [])
+        # Helper to create chunked zips from DISK files
+        def create_zip_chunk(paths_with_arcnames):
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for path, arcname in paths_with_arcnames:
+                    if os.path.exists(path):
+                        zf.write(path, arcname=arcname)
+            return buf.getvalue()
 
-                    for idx, img_bytes in enumerate(image_bytes_list):
-                        # Clean prompt_id for filename
+        # Gather all files
+        all_files = [] # list of (path, arcname, size_mb)
+        for prompt_id, result_data in results.items():
+            if result_data['status'] == 'completed':
+                paths = result_data.get('file_paths', [])
+                for idx, path in enumerate(paths):
+                    if path and os.path.exists(path):
+                        # Construct filename
                         safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
-                        suffix = f"_{idx+1}" if len(image_bytes_list) > 1 else ""
+                        suffix = f"_{idx+1}" if len(paths) > 1 else ""
                         filename = f"{safe_id}{suffix}.png"
+                        
+                        size_mb = os.path.getsize(path) / (1024*1024)
+                        all_files.append((path, filename, size_mb))
 
-                        zip_file.writestr(filename, img_bytes)
+        # Create Chunks (Max 200MB per zip to prevent RAM crash)
+        MAX_ZIP_SIZE = 200
+        current_chunk = []
+        current_size = 0
+        
+        chunks = []
+        
+        for p, n, s in all_files:
+            if current_size + s > MAX_ZIP_SIZE and current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = []
+                current_size = 0
+            current_chunk.append((p, n))
+            current_size += s
+            
+        if current_chunk:
+            chunks.append(current_chunk)
 
-        st.download_button(
-            label=f"📥 Download All {total_images} Images (ZIP)",
-            data=zip_buffer.getvalue(),
-            file_name=f"batch_images_{int(time.time())}.zip",
-            mime="application/zip",
-            type="primary",
-            use_container_width=True
-        )
+        # Render Download Buttons
+        if len(chunks) == 1:
+            # Single Button
+            zip_data = create_zip_chunk(chunks[0])
+            st.download_button(
+                label=f"📥 Download All Images (ZIP)",
+                data=zip_data,
+                file_name=f"batch_images_{int(time.time())}.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True
+            )
+        else:
+            # Multiple Parts
+            st.info(f"ℹ️ Batch too large for single ZIP. Download in {len(chunks)} parts:")
+            cols = st.columns(min(len(chunks), 6))
+            for i, chunk in enumerate(chunks):
+                col_idx = i % 6
+                with cols[col_idx]:
+                    zip_data = create_zip_chunk(chunk)
+                    st.download_button(
+                        label=f"📦 Part {i+1} (ZIP)",
+                        data=zip_data,
+                        file_name=f"batch_images_part{i+1}.zip",
+                        mime="application/zip",
+                        use_container_width=True
+                    )
 
     # -------------------------------------------------------------------------
     # Failed Prompts CSV
@@ -799,29 +861,26 @@ if st.session_state.image_results:
                             st.image(img_url, use_container_width=True)
 
                             # Download button
-                            img_bytes = None
-                            if result_data.get('image_bytes_list') and len(result_data['image_bytes_list']) > idx:
-                                img_bytes = result_data['image_bytes_list'][idx]
-
-                            if img_bytes:
-                                st.download_button(
-                                    label=f"⬇️ Download",
-                                    data=img_bytes,
-                                    file_name=f"{safe_id}{suffix}.png",
-                                    mime="image/png",
-                                    key=f"dl_{safe_id}_{idx}",
-                                    use_container_width=True
+                            path_list = result_data.get('file_paths', [])
+                            img_path = path_list[idx] if idx < len(path_list) else None
+                            
+                            if img_path and os.path.exists(img_path):
+                                with open(img_path, "rb") as f:
+                                    st.download_button(
+                                        label=f"⬇️ Download {safe_id}{suffix}.png",
+                                        data=f,
+                                        file_name=f"{safe_id}{suffix}.png",
+                                        mime="image/png",
+                                        key=f"dl_{safe_id}_{idx}",
+                                        use_container_width=True
+                                    )
+                            else:
+                                st.markdown(
+                                    f'<a href="{img_url}" download="{safe_id}{suffix}.png" target="_blank">'
+                                    f'<button style="width:100%; padding:0.5rem; background-color:#6c757d; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Open Link</button>'
+                                    f'</a>',
+                                    unsafe_allow_html=True
                                 )
-
-                    # Details
-                    with st.expander("ℹ️ Details"):
-                        st.json({
-                            "id": data.get('id'),
-                            "prompt": result_data['prompt'],
-                            "number_of_images": result_data['number_of_images'],
-                            "file_urls": file_urls,
-                            "created_at": data.get('created_at')
-                        })
                 else:
                     st.warning("⚠️ Image URLs not available. Check the History page.")
 

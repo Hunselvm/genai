@@ -237,29 +237,45 @@ class BatchVideoGenerator:
                                 if self.logger:
                                     self.logger.error(f"Failed to fetch from history: {str(e)}")
 
-                        # Fetch video bytes for reliable downloading
-                        video_bytes_list = []
+                        # Download video to TEMP DISK (Optimization for RAM)
+                        file_paths = []
                         file_urls = event_data.get('file_urls', [])
                         if not file_urls and event_data.get('file_url'):
                             file_urls = [event_data.get('file_url')]
 
                         if file_urls:
                             try:
+                                temp_dir = st.session_state.get('temp_dir')
+                                if not temp_dir or not os.path.exists(temp_dir):
+                                    # Create specific temp dir for this batch if missing
+                                    temp_dir = tempfile.mkdtemp(prefix="aroll_batch_")
+                                    st.session_state.temp_dir = temp_dir
+                                
                                 async with httpx.AsyncClient() as client:
-                                    for url in file_urls:
-                                        resp = await client.get(url, timeout=60.0)
-                                        if resp.status_code == 200:
-                                            video_bytes_list.append(resp.content)
+                                    for idx, url in enumerate(file_urls):
+                                        # Use stream to download large files without loading into RAM
+                                        safe_p_id = "".join(c if c.isalnum() else '_' for c in prompt_id)[:20]
+                                        fname = f"{safe_p_id}_{idx}.mp4"
+                                        fpath = os.path.join(temp_dir, fname)
+                                        
+                                        async with client.stream('GET', url) as resp:
+                                            resp.raise_for_status()
+                                            with open(fpath, 'wb') as f:
+                                                async for chunk in resp.aiter_bytes():
+                                                    f.write(chunk)
+                                        file_paths.append(fpath)
+
                             except Exception as e:
                                 if self.logger:
-                                    self.logger.error(f"Failed to download video bytes: {str(e)}")
+                                    self.logger.error(f"Failed to download video: {str(e)}")
 
                         self.results[prompt_id] = {
                             'status': 'completed',
                             'data': event_data,
                             'prompt': prompt,
                             'number_of_videos': number_of_videos,
-                            'video_bytes_list': video_bytes_list
+                            'file_paths': file_paths, # Store path instead of bytes
+                            'file_urls': file_urls
                         }
                         return event_data
 
@@ -712,32 +728,76 @@ if st.session_state.aroll_results:
         st.divider()
         st.subheader("📦 Bulk Download")
         
-        # Prepare ZIP file
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for prompt_id, result_data in results.items():
-                if result_data['status'] == 'completed':
-                    video_bytes_list = result_data.get('video_bytes_list', [])
-                    
-                    # Also include file_urls if bytes failed (less likely but good fallback?)
-                    # For ZIP we really need bytes.
-                    
-                    for idx, vid_bytes in enumerate(video_bytes_list):
-                        # Clean prompt_id for filename
+        # Helper to create chunked zips from DISK files
+        def create_zip_chunk(paths_with_arcnames):
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for path, arcname in paths_with_arcnames:
+                    if os.path.exists(path):
+                        zf.write(path, arcname=arcname)
+            return buf.getvalue()
+
+        # Gather all files
+        all_files = [] # list of (path, arcname, size_mb)
+        for prompt_id, result_data in results.items():
+            if result_data['status'] == 'completed':
+                paths = result_data.get('file_paths', [])
+                for idx, path in enumerate(paths):
+                    if path and os.path.exists(path):
+                        # Construct filename
                         safe_id = "".join(c if c.isalnum() or c in ('-', '_') else '_' for c in prompt_id)
-                        suffix = f"_{idx+1}" if len(video_bytes_list) > 1 else ""
+                        suffix = f"_{idx+1}" if len(paths) > 1 else ""
                         filename = f"{safe_id}{suffix}.mp4"
                         
-                        zip_file.writestr(filename, vid_bytes)
+                        size_mb = os.path.getsize(path) / (1024*1024)
+                        all_files.append((path, filename, size_mb))
+
+        # Create Chunks (Max 200MB per zip to prevent RAM crash)
+        MAX_ZIP_SIZE = 200
+        current_chunk = []
+        current_size = 0
+        chunk_idx = 1
         
-        st.download_button(
-            label=f"📥 Download All {total_videos} Videos (ZIP)",
-            data=zip_buffer.getvalue(),
-            file_name=f"batch_aroll_{int(time.time())}.zip",
-            mime="application/zip",
-            type="primary",
-            use_container_width=True
-        )
+        chunks = []
+        
+        for p, n, s in all_files:
+            if current_size + s > MAX_ZIP_SIZE and current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = []
+                current_size = 0
+            current_chunk.append((p, n))
+            current_size += s
+            
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        # Render Download Buttons
+        if len(chunks) == 1:
+            # Single Button
+            zip_data = create_zip_chunk(chunks[0])
+            st.download_button(
+                label=f"📥 Download All Videos (ZIP)",
+                data=zip_data,
+                file_name=f"batch_aroll_{int(time.time())}.zip",
+                mime="application/zip",
+                type="primary",
+                use_container_width=True
+            )
+        else:
+            # Multiple Parts
+            st.info(f"ℹ️ Batch too large for single ZIP. Download in {len(chunks)} parts:")
+            cols = st.columns(min(len(chunks), 4))
+            for i, chunk in enumerate(chunks):
+                col_idx = i % 4
+                with cols[col_idx]:
+                    zip_data = create_zip_chunk(chunk)
+                    st.download_button(
+                        label=f"📦 Part {i+1} (ZIP)",
+                        data=zip_data,
+                        file_name=f"batch_aroll_part{i+1}.zip",
+                        mime="application/zip",
+                        use_container_width=True
+                    )
 
     # -------------------------------------------------------------------------
     # Failed Prompts CSV
@@ -793,23 +853,23 @@ if st.session_state.aroll_results:
                         st.video(vid_url)
                         
                         # Download button
-                        vid_bytes = None
-                        if result_data.get('video_bytes_list') and len(result_data['video_bytes_list']) > idx:
-                            vid_bytes = result_data['video_bytes_list'][idx]
+                        path_list = result_data.get('file_paths', [])
+                        video_path = path_list[idx] if idx < len(path_list) else None
                         
-                        if vid_bytes:
-                            st.download_button(
-                                label=f"⬇️ Download {safe_id}{suffix}.mp4",
-                                data=vid_bytes,
-                                file_name=f"{safe_id}{suffix}.mp4",
-                                mime="video/mp4",
-                                key=f"dl_{safe_id}_{idx}",
-                                use_container_width=True
-                            )
+                        if video_path and os.path.exists(video_path):
+                            with open(video_path, "rb") as f:
+                                st.download_button(
+                                    label=f"⬇️ Download {safe_id}{suffix}.mp4",
+                                    data=f,
+                                    file_name=f"{safe_id}{suffix}.mp4",
+                                    mime="video/mp4",
+                                    key=f"dl_{safe_id}_{idx}",
+                                    use_container_width=True
+                                )
                         else:
                             st.markdown(
                                 f'<a href="{vid_url}" download="{safe_id}{suffix}.mp4" target="_blank">'
-                                f'<button style="width:100%; padding:0.5rem; background-color:#6c757d; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Open Link (Rename Failed)</button>'
+                                f'<button style="width:100%; padding:0.5rem; background-color:#6c757d; color:white; border:none; border-radius:0.25rem; cursor:pointer;">⬇️ Open Link (Download Failed)</button>'
                                 f'</a>',
                                 unsafe_allow_html=True
                             )
