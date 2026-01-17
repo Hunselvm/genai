@@ -9,6 +9,8 @@ from utils.logger import StreamlitLogger
 from utils.quota_display import display_quota
 from utils.sidebar import render_sidebar
 import time
+import tempfile
+import os
 
 st.set_page_config(page_title="Create Image", page_icon="🎨", layout="wide")
 
@@ -63,6 +65,16 @@ with st.form("create_image_form"):
         height=150,
         help="Describe what you want to see in the image. Be detailed!"
     )
+
+    st.subheader("Reference Image (Optional)")
+    reference_image = st.file_uploader(
+        "Upload a reference image to guide the style/content",
+        type=['jpg', 'jpeg', 'png', 'webp'],
+        help="This image will be used as a reference for image generation"
+    )
+
+    if reference_image:
+        st.image(reference_image, caption="Reference Image", width='stretch')
 
     col1, col2 = st.columns(2)
 
@@ -132,6 +144,15 @@ if submit_button:
                     logger=logger
                 )
 
+                # Save reference image to temp file if provided
+                reference_image_path = None
+                if reference_image:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                        tmp.write(reference_image.getvalue())
+                        tmp.flush()
+                        os.fsync(tmp.fileno())
+                        reference_image_path = tmp.name
+
                 if logger:
                     logger.info(f"Generating images with prompt: {prompt[:50]}...")
                     logger.info(f"Aspect ratio: {aspect_ratio}")
@@ -145,7 +166,8 @@ if submit_button:
                     async with client.create_image_stream(
                         prompt=prompt,
                         aspect_ratio=aspect_ratio,
-                        number_of_images=number_of_images
+                        number_of_images=number_of_images,
+                        reference_images=[reference_image_path] if reference_image_path else None
                     ) as response:
                         if logger:
                             logger.success("Stream connection established!")
@@ -335,6 +357,14 @@ if submit_button:
                 status_text.empty()
                 time_text.empty()
                 retry_text.empty()
+
+            finally:
+                # Cleanup reference image temp file
+                if reference_image_path and os.path.exists(reference_image_path):
+                    try:
+                        os.unlink(reference_image_path)
+                    except:
+                        pass
 
 # Tips section
 with st.expander("💡 Tips for Better Results"):
