@@ -33,15 +33,15 @@ RETRY_CONFIG = {
         'timeout_minutes': 10,
         'initial_poll_seconds': 5,
         'max_poll_seconds': 30,
-        'max_concurrent': 5,
-        'requests_per_minute': 30
+        'max_concurrent': 10,
+        'requests_per_minute': 60
     },
     'videos': {
         'timeout_minutes': 20,
         'initial_poll_seconds': 5,
         'max_poll_seconds': 45,
-        'max_concurrent': 3,
-        'requests_per_minute': 20
+        'max_concurrent': 10,
+        'requests_per_minute': 40
     }
 }
 
