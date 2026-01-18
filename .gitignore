@@ -1,6 +1,9 @@
 .env
+.env.genaipro
+genaipro_cookies.py
 .streamlit/secrets.toml
 __pycache__/
 *.pyc
 venv/
 .DS_Store
+genaipro_monitor.log
