@@ -552,7 +552,7 @@ class AutomationEngine:
         # Run Video Gen
         if video_work_items:
             vid_engine = AutomationEngine(self.client, 'videos', self.progress_callback, self.logger)
-            await vid_engine.generate_videos_batch(video_work_items, aspect_ratio, job)
+            await vid_engine.generate_videos_batch(video_work_items, aspect_ratio, job=job)
         
         # Config final results
         final_results_source = job.results if job else {}
